@@ -267,8 +267,9 @@ int merge_shards(const std::string &vamana_prefix, const std::string &vamana_suf
     diskann::cout << "# nodes: " << nnodes << ", max. degree: " << max_degree << std::endl;
 
     // compute inverse map: node -> shards
-    std::vector<std::pair<uint32_t, uint32_t>> node_shard;
+    std::vector<std::pair<uint32_t, uint32_t>> node_shard; // （全局节点id，多个shard id）
     node_shard.reserve(nelems);
+    // 将节点id和多个shard id映射到node_shard中
     for (size_t shard = 0; shard < nshards; shard++)
     {
         diskann::cout << "Creating inverse map -- shard #" << shard << std::endl;
@@ -285,6 +286,8 @@ int merge_shards(const std::string &vamana_prefix, const std::string &vamana_suf
 
     // will merge all the labels to medoids files of each shard into one
     // combined file
+    // DiskANN 支持带标签的过滤搜索，每个分片会有一个从“标签”到该分片medoid的映射表
+    // 这里将所有分片的映射表合并为一个全局映射表
     if (use_filters)
     {
         std::unordered_map<uint32_t, std::vector<uint32_t>> global_label_to_medoids;
@@ -406,21 +409,22 @@ int merge_shards(const std::string &vamana_prefix, const std::string &vamana_suf
     std::random_device rng;
     std::mt19937 urng(rng());
 
-    std::vector<bool> nhood_set(nnodes, 0);
-    std::vector<uint32_t> final_nhood;
+    std::vector<bool> nhood_set(nnodes, 0); // 邻居去重表，用于记录邻居是否已经加入最终的邻居列表
+    std::vector<uint32_t> final_nhood; // 最终的邻居列表
 
-    uint32_t nnbrs = 0, shard_nnbrs = 0;
-    uint32_t cur_id = 0;
+    uint32_t nnbrs = 0, shard_nnbrs = 0; // 当前节点邻居数和在当前shard的邻居数
+    uint32_t cur_id = 0; // 当前节点id
     for (const auto &id_shard : node_shard)
     {
         uint32_t node_id = id_shard.first;
         uint32_t shard_id = id_shard.second;
-        if (cur_id < node_id)
+        // 如果当前节点id小于node_id，说明cur_id在所有分片中的节点已经被收集到 final_hood 里，需要写入merged_vamana_writer
+        if (cur_id < node_id) 
         {
-            // Gopal. random_shuffle() is deprecated.
+            // 打乱final_nhood，并取前max_degree个邻居，不按距离排序写入，视为从所有分片中收集的邻居本身就是高质量的
             std::shuffle(final_nhood.begin(), final_nhood.end(), urng);
-            nnbrs = (uint32_t)(std::min)(final_nhood.size(), (uint64_t)max_degree);
-            // write into merged ofstream
+            nnbrs = (uint32_t)(std::min)(final_nhood.size(), (uint64_t)max_degree); // 取前max_degree个邻居
+            // 写入merged_vamana_writer
             merged_vamana_writer.write((char *)&nnbrs, sizeof(uint32_t));
             merged_vamana_writer.write((char *)final_nhood.data(), nnbrs * sizeof(uint32_t));
             merged_index_size += (sizeof(uint32_t) + nnbrs * sizeof(uint32_t));
@@ -443,12 +447,14 @@ int merge_shards(const std::string &vamana_prefix, const std::string &vamana_suf
         }
 
         std::vector<uint32_t> shard_nhood(shard_nnbrs);
+        // 从当前的分片中，读取该节点的邻居列表
         if (shard_nnbrs > 0)
             vamana_readers[shard_id].read((char *)shard_nhood.data(), shard_nnbrs * sizeof(uint32_t));
         // rename nodes
-        for (uint64_t j = 0; j < shard_nnbrs; j++)
+        for (uint64_t j = 0; j < shard_nnbrs; j++) // 遍历当前shard的邻居列表
         {
-            if (nhood_set[idmaps[shard_id][shard_nhood[j]]] == 0)
+            // 邻居去重
+            if (nhood_set[idmaps[shard_id][shard_nhood[j]]] == 0) // 如果邻居在nhood_set中不存在，则加入final_nhood
             {
                 nhood_set[idmaps[shard_id][shard_nhood[j]]] = 1;
                 final_nhood.emplace_back(idmaps[shard_id][shard_nhood[j]]);
