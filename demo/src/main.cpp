@@ -1,28 +1,34 @@
 #include <iostream>
 #include <vector>
-#include <thread>
-#include <numeric>
-#include <algorithm>
 #include <string>
 #include <chrono>
-#include <fstream> // Added for file operations
+#include <thread>
+#include <omp.h>
+#include <fstream>
+#include <atomic>
+#include <algorithm>
 
 #include "utils.h"
 #include "kmeans.h"
 #include "vamana_graph.h"
 #include "search.h"
-#include "omp.h"
 
 void build_mode(const std::string& data_path) {
     std::cout << "\n--- Running in BUILD mode ---" << std::endl;
 
     // --- Parameters ---
-    const float alpha = 0.1f;
+    const float alpha = 0.01f;
     const size_t m = 256;
-    const int t = 10;
+    const int t = 8;
     const int l = 5;
     const size_t graph_degree = 32;
     const size_t build_complexity = 50;
+    
+    // 获取可用线程数，但为每个索引构建留一些余量
+    const size_t max_threads = std::thread::hardware_concurrency();
+    const size_t threads_per_build = std::max(1UL, max_threads / 2);  // 每个索引构建使用一半的线程
+    
+    std::cout << "Using " << threads_per_build << " threads per index build (total CPU cores: " << max_threads << ")" << std::endl;
 
     // --- Load Data ---
     std::cout << "Loading data from " << data_path << "..." << std::endl;
@@ -54,7 +60,7 @@ void build_mode(const std::string& data_path) {
     for(size_t i = 0; i < m; ++i) { for(size_t j = 0; j < dim; ++j) { final_centroids[i][j] /= t; } }
     
     // --- Data Bucketing ---
-    std::cout << "Assigning full dataset to buckets..." << std::endl;
+
     Buckets buckets(m);
     #pragma omp parallel for
     for (size_t i = 0; i < num_points; ++i) {
@@ -79,31 +85,76 @@ void build_mode(const std::string& data_path) {
     meta_writer.close();
 
     // --- Build Medoid Vamana Graph ---
-    std::cout << "Building Medoid Vamana Graph..." << std::endl;
-    build_and_save_vamana_graph(final_centroids, {}, "medoid_vamana.index", graph_degree, build_complexity);
+    std::cout << "Building Medoid Vamana Graph (using " << threads_per_build << " threads)..." << std::endl;
+    build_and_save_vamana_graph(final_centroids, {}, "medoid_vamana.index", graph_degree, build_complexity, threads_per_build);
 
-    // --- Build Bucket Vamana Graphs ---
-    const size_t MIN_BUCKET_SIZE_FOR_INDEX = 50;  // 大幅增加最小bucket大小要求
+    // --- Build Bucket Vamana Graphs (bucket间并行构建) ---
+    const size_t MIN_BUCKET_SIZE_FOR_INDEX = 100;
     std::cout << "Building and saving Vamana graphs for each bucket..." << std::endl;
-    size_t buckets_built = 0;
-    #pragma omp parallel for reduction(+:buckets_built)
+    
+    // 计算合理的并行度
+    const size_t max_parallel_buckets = std::max(1UL, max_threads);  // 同时构建的bucket数量
+    const size_t threads_per_bucket = std::max(1UL, max_threads / max_parallel_buckets);  // 每个bucket的线程数
+    
+    std::cout << "Parallel bucket building: " << max_parallel_buckets << " buckets simultaneously, " 
+              << threads_per_bucket << " threads per bucket" << std::endl;
+    
+    std::atomic<size_t> buckets_built(0);
+    auto build_start_time = std::chrono::high_resolution_clock::now();
+    
+    // 准备所有需要构建的bucket
+    std::vector<size_t> buckets_to_build;
     for (size_t i = 0; i < m; ++i) {
         if (buckets[i].size() >= MIN_BUCKET_SIZE_FOR_INDEX) {
-            DataSet bucket_data;
-            bucket_data.reserve(buckets[i].size());
-            for (const auto& point_idx : buckets[i]) {
-                bucket_data.push_back(get_point_copy(full_dataset_flat, point_idx, dim));
-            }
-            std::string bucket_graph_path = "bucket_" + std::to_string(i) + "_vamana.index";
-            // 传递空的tags，让DiskANN使用局部ID (0, 1, 2, ...)
-            build_and_save_vamana_graph(bucket_data, {}, bucket_graph_path, graph_degree, build_complexity);
-            buckets_built++;
+            buckets_to_build.push_back(i);
         } else {
             std::cout << "Skipping bucket " << i << " (size: " << buckets[i].size() 
                       << ", minimum required: " << MIN_BUCKET_SIZE_FOR_INDEX << ")" << std::endl;
         }
     }
-    std::cout << "Built " << buckets_built << " bucket indices out of " << m << " total buckets." << std::endl;
+    
+    std::cout << "Will build " << buckets_to_build.size() << " valid buckets out of " << m << " total buckets." << std::endl;
+    
+    // 使用OpenMP并行构建bucket，但限制并行度
+    #pragma omp parallel for schedule(dynamic) num_threads(max_parallel_buckets)
+    for (size_t idx = 0; idx < buckets_to_build.size(); ++idx) {
+        size_t i = buckets_to_build[idx];
+        
+        // 线程安全的输出
+        #pragma omp critical
+        {
+            std::cout << "Thread " << omp_get_thread_num() << " building bucket " << i 
+                      << " (" << buckets[i].size() << " points)..." << std::endl;
+        }
+        
+        DataSet bucket_data;
+        bucket_data.reserve(buckets[i].size());
+        for (const auto& point_idx : buckets[i]) {
+            bucket_data.push_back(get_point_copy(full_dataset_flat, point_idx, dim));
+        }
+        
+        std::string bucket_graph_path = "bucket_" + std::to_string(i) + "_vamana.index";
+        
+        // 传递空的tags，让DiskANN使用局部ID，每个bucket使用分配的线程数
+        build_and_save_vamana_graph(bucket_data, {}, bucket_graph_path, graph_degree, build_complexity, threads_per_bucket);
+        
+        // 原子操作更新计数器
+        buckets_built.fetch_add(1);
+        
+        // 线程安全的完成输出
+        #pragma omp critical
+        {
+            std::cout << "Thread " << omp_get_thread_num() << " completed bucket " << i 
+                      << " (" << buckets_built.load() << "/" << buckets_to_build.size() << " finished)" << std::endl;
+        }
+    }
+    
+    auto build_end_time = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> build_time = build_end_time - build_start_time;
+    
+    std::cout << "Built " << buckets_built.load() << " bucket indices out of " << m << " total buckets." << std::endl;
+    std::cout << "Total bucket build time: " << build_time.count() << " seconds" << std::endl;
+    std::cout << "Average time per bucket: " << (buckets_built.load() > 0 ? build_time.count() / buckets_built.load() : 0) << " seconds" << std::endl;
     std::cout << "\nBuild mode finished successfully." << std::endl;
 }
 
