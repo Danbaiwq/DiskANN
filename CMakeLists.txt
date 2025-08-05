@@ -331,3 +331,12 @@ include(clang-format.cmake)
 if(PYBIND)
     add_subdirectory(python)
 endif()
+
+if(WIN32)
+  if(MSVC)
+    add_compile_options(/d2FH4-)
+  endif()
+endif()
+
+# Add the demo subdirectory to the build
+add_subdirectory(demo)
