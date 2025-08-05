@@ -83,9 +83,10 @@ void build_mode(const std::string& data_path) {
     build_and_save_vamana_graph(final_centroids, {}, "medoid_vamana.index", graph_degree, build_complexity);
 
     // --- Build Bucket Vamana Graphs ---
-    const size_t MIN_BUCKET_SIZE_FOR_INDEX = 2;
+    const size_t MIN_BUCKET_SIZE_FOR_INDEX = 50;  // 大幅增加最小bucket大小要求
     std::cout << "Building and saving Vamana graphs for each bucket..." << std::endl;
-    #pragma omp parallel for
+    size_t buckets_built = 0;
+    #pragma omp parallel for reduction(+:buckets_built)
     for (size_t i = 0; i < m; ++i) {
         if (buckets[i].size() >= MIN_BUCKET_SIZE_FOR_INDEX) {
             DataSet bucket_data;
@@ -94,9 +95,15 @@ void build_mode(const std::string& data_path) {
                 bucket_data.push_back(get_point_copy(full_dataset_flat, point_idx, dim));
             }
             std::string bucket_graph_path = "bucket_" + std::to_string(i) + "_vamana.index";
-            build_and_save_vamana_graph(bucket_data, buckets[i], bucket_graph_path, graph_degree, build_complexity);
+            // 传递空的tags，让DiskANN使用局部ID (0, 1, 2, ...)
+            build_and_save_vamana_graph(bucket_data, {}, bucket_graph_path, graph_degree, build_complexity);
+            buckets_built++;
+        } else {
+            std::cout << "Skipping bucket " << i << " (size: " << buckets[i].size() 
+                      << ", minimum required: " << MIN_BUCKET_SIZE_FOR_INDEX << ")" << std::endl;
         }
     }
+    std::cout << "Built " << buckets_built << " bucket indices out of " << m << " total buckets." << std::endl;
     std::cout << "\nBuild mode finished successfully." << std::endl;
 }
 

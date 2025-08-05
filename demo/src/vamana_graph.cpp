@@ -2,6 +2,9 @@
 #include <iostream>
 #include <vector>
 #include <memory> // For std::shared_ptr
+#include <thread>  // For std::thread
+#include <numeric> // For std::iota
+#include <algorithm> // For std::max
 
 #include "index.h"
 #include "parameters.h"
@@ -24,10 +27,22 @@ InMemoryIndex build_in_memory_index(const DataSet& data, const std::vector<uint3
     size_t num_points = data.size();
     size_t dim = data[0].size();
     
+    // 根据数据点数量动态调整参数
+    size_t actual_graph_degree = std::min(graph_degree, num_points / 2);  // 图度数不能超过点数的一半
+    actual_graph_degree = std::max(actual_graph_degree, (size_t)3);       // 但至少要 3
+    
+    size_t actual_build_complexity = std::min(build_complexity, num_points - 1);  // 构建复杂度不能超过点数-1
+    actual_build_complexity = std::max(actual_build_complexity, actual_graph_degree * 2);  // 至少是图度数的2倍
+    
+    std::cout << "Building index for " << num_points << " points with degree=" 
+              << actual_graph_degree << ", complexity=" << actual_build_complexity << std::endl;
+    
     auto index_write_params = std::make_shared<diskann::IndexWriteParameters>(
-        diskann::IndexWriteParametersBuilder(build_complexity, graph_degree).with_num_threads(std::thread::hardware_concurrency()).build()
+        diskann::IndexWriteParametersBuilder(actual_build_complexity, actual_graph_degree)
+            .with_num_threads(1)  // 使用单线程避免冲突
+            .build()
     );
-    auto index_search_params = std::make_shared<diskann::IndexSearchParams>(build_complexity, 0);
+    auto index_search_params = std::make_shared<diskann::IndexSearchParams>(actual_build_complexity, 0);
 
     auto index = std::make_unique<diskann::Index<float, uint32_t, uint32_t>>(
         diskann::Metric::L2, dim, num_points, index_write_params, index_search_params);
