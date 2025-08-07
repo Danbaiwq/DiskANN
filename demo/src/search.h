@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <mutex>
 #include <shared_mutex>
+#include <atomic>
 
 // A struct to hold the search results for a single query
 struct QueryResult {
@@ -22,9 +23,18 @@ class IndexCache {
 public:
     IndexCache(size_t max_size_bytes, size_t dim, size_t graph_degree);
     IndexPtr get(uint32_t key);
+    
+    // 非阻塞的获取方法 - 核心改进
+    IndexPtr get_non_blocking(uint32_t key);
+    
+    // 获取缓存统计信息
+    void print_stats() const;
 
 private:
     void put_locked(uint32_t key, IndexPtr index);
+    
+    // 非阻塞的尝试插入方法
+    bool try_put_non_blocking(uint32_t key, IndexPtr index);
 
     size_t max_size;
     size_t current_size;
@@ -33,6 +43,11 @@ private:
     std::unordered_map<uint32_t, IndexPtr> cache;
     std::list<uint32_t> lru;
     std::shared_mutex mtx; 
+    
+    // 为非阻塞实现添加统计信息
+    std::atomic<uint64_t> cache_hits{0};
+    std::atomic<uint64_t> cache_misses{0};
+    std::atomic<uint64_t> direct_loads{0};  // 直接从文件加载，未放入缓存的次数
 };
 
 // Load a Vamana index from a file

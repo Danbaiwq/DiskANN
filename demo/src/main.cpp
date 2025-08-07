@@ -262,6 +262,9 @@ void search_mode(const std::string& query_path, const std::string& gt_path) {
             std::cout << "Recall@" << recall_at << ": " << recall * 100 << "%" << std::endl;
         }
     }
+    
+    // 输出缓存统计信息
+    bucket_index_cache.print_stats();
 }
 
 

@@ -43,6 +43,112 @@ IndexPtr IndexCache::get(uint32_t key) {
     return index;
 }
 
+// 核心改进：非阻塞的获取方法
+IndexPtr IndexCache::get_non_blocking(uint32_t key) {
+    // 第一步：快速检查缓存中是否存在
+    {
+        std::shared_lock<std::shared_mutex> lock(mtx);
+        auto it = cache.find(key);
+        if (it != cache.end()) {
+            cache_hits.fetch_add(1);
+            return it->second;
+        }
+    }
+    
+    cache_misses.fetch_add(1);
+    
+    // 第二步：缓存未命中，直接从文件加载（不等待）
+    std::string index_path = "bucket_" + std::to_string(key) + "_vamana.index";
+    IndexPtr index = load_index(index_path, dim);
+    
+    if (!index) {
+        return nullptr;
+    }
+    
+    // 第三步：尝试非阻塞插入缓存，如果不能立即插入则直接返回索引
+    if (try_put_non_blocking(key, index)) {
+        // 成功插入缓存
+        return index;
+    } else {
+        // 无法插入缓存（可能缓存满了且正在被其他线程使用），直接返回加载的索引
+        direct_loads.fetch_add(1);
+        return index;
+    }
+}
+
+bool IndexCache::try_put_non_blocking(uint32_t key, IndexPtr index) {
+    // 尝试获取写锁，如果无法立即获取则返回false
+    std::unique_lock<std::shared_mutex> lock(mtx, std::try_to_lock);
+    if (!lock.owns_lock()) {
+        return false; // 无法立即获取锁，避免阻塞
+    }
+    
+    // 再次检查缓存中是否已经存在该key（双重检查）
+    if (cache.find(key) != cache.end()) {
+        return true; // 已经在缓存中，认为成功
+    }
+    
+    auto index_size = diskann::estimate_ram_usage(index->get_num_points(), dim, sizeof(float), graph_degree);
+    
+    // 如果添加这个索引会超过缓存大小限制，且需要LRU淘汰
+    if (current_size + index_size > max_size) {
+        // 检查是否有足够的项目可以快速淘汰
+        if (lru.empty()) {
+            return false; // 无法释放空间
+        }
+        
+        // 尝试快速淘汰一些项目，但不要淘汰太多以避免阻塞
+        size_t needed_space = index_size;
+        size_t space_to_free = 0;
+        size_t items_to_evict = 0;
+        
+        auto it = lru.rbegin();
+        while (it != lru.rend() && current_size - space_to_free + index_size > max_size && items_to_evict < 3) {
+            auto evict_key = *it;
+            auto evict_index = cache.at(evict_key);
+            space_to_free += diskann::estimate_ram_usage(evict_index->get_num_points(), dim, sizeof(float), graph_degree);
+            ++it;
+            ++items_to_evict;
+        }
+        
+        if (current_size - space_to_free + index_size > max_size) {
+            return false; // 快速淘汰仍然不够空间
+        }
+        
+        // 执行快速淘汰
+        for (size_t i = 0; i < items_to_evict; ++i) {
+            auto last_key = lru.back();
+            lru.pop_back();
+            auto evicted_index = cache.at(last_key);
+            current_size -= diskann::estimate_ram_usage(evicted_index->get_num_points(), dim, sizeof(float), graph_degree);
+            cache.erase(last_key);
+        }
+    }
+    
+    // 添加到缓存
+    cache[key] = index;
+    lru.push_front(key);
+    current_size += index_size;
+    
+    return true;
+}
+
+void IndexCache::print_stats() const {
+    uint64_t hits = cache_hits.load();
+    uint64_t misses = cache_misses.load();
+    uint64_t direct = direct_loads.load();
+    uint64_t total = hits + misses;
+    
+    std::cout << "\n--- IndexCache 统计信息 ---" << std::endl;
+    std::cout << "缓存命中次数: " << hits << std::endl;
+    std::cout << "缓存未命中次数: " << misses << std::endl;
+    std::cout << "直接文件加载次数: " << direct << std::endl;
+    std::cout << "缓存命中率: " << (total > 0 ? (double)hits / total * 100.0 : 0.0) << "%" << std::endl;
+    std::cout << "当前缓存大小: " << cache.size() << " 个索引" << std::endl;
+    std::cout << "当前内存使用: " << current_size / (1024 * 1024) << " MB" << std::endl;
+    std::cout << "最大内存限制: " << max_size / (1024 * 1024) << " MB" << std::endl;
+}
+
 void IndexCache::put_locked(uint32_t key, IndexPtr index) {
     auto index_size = diskann::estimate_ram_usage(index->get_num_points(), dim, sizeof(float), graph_degree);
     while (current_size + index_size > max_size && !lru.empty()) {
@@ -73,14 +179,16 @@ QueryResult search_two_stage(
     IndexCache& index_cache,
     size_t dim
 ) {
+    // 第一步：在medoid_vamana查找最近的bucket_id
     std::vector<uint32_t> nearest_bucket_ids(f);
     medoid_index.search(query.data(), f, f, nearest_bucket_ids.data(), nullptr);
 
     std::vector<std::pair<float, uint32_t>> candidates;
     std::set<uint32_t> visited_ids;
     
+    // 第二步和第三步：使用非阻塞缓存访问
     for (uint32_t bucket_id : nearest_bucket_ids) {
-        auto bucket_index = index_cache.get(bucket_id);
+        auto bucket_index = index_cache.get_non_blocking(bucket_id);  // 使用非阻塞方法
         if (bucket_index) {
             size_t actual_k = std::min(k, bucket_index->get_num_points());
             if (actual_k == 0) continue;
