@@ -7,6 +7,7 @@
 #include <fstream>
 #include <atomic>
 #include <algorithm>
+#include <iomanip>  // 添加这个头文件用于std::fixed和std::setprecision
 
 #include "utils.h"
 #include "kmeans.h"
@@ -18,9 +19,10 @@ void build_mode(const std::string& data_path) {
 
     // --- Parameters ---
     const float alpha = 0.01f;
-    const size_t m = 256;
+    const size_t m = 1024;
     const int t = 8;
-    const int l = 5;
+    const int l = 3;
+    const float beta = 1.2f;  // 新增：距离比例约束参数
     const size_t graph_degree = 32;
     const size_t build_complexity = 50;
     
@@ -29,6 +31,7 @@ void build_mode(const std::string& data_path) {
     const size_t threads_per_build = std::max(1UL, max_threads / 2);  // 每个索引构建使用一半的线程
     
     std::cout << "Using " << threads_per_build << " threads per index build (total CPU cores: " << max_threads << ")" << std::endl;
+    std::cout << "Distance constraint parameter beta: " << beta << std::endl;
 
     // --- Load Data ---
     std::cout << "Loading data from " << data_path << "..." << std::endl;
@@ -59,29 +62,59 @@ void build_mode(const std::string& data_path) {
     }
     for(size_t i = 0; i < m; ++i) { for(size_t j = 0; j < dim; ++j) { final_centroids[i][j] /= t; } }
     
-    // --- Data Bucketing ---
+    // --- 优化的数据分桶策略 (基于距离比例约束) ---
+    std::cout << "Starting optimized vector bucketing with distance constraint (beta=" << beta << ")..." << std::endl;
 
     Buckets buckets(m);
-    #pragma omp parallel for
+    size_t total_bucket_assignments = 0;  // 使用普通变量进行统计
+    
+    #pragma omp parallel for reduction(+:total_bucket_assignments)
     for (size_t i = 0; i < num_points; ++i) {
         DataPoint point = get_point_copy(full_dataset_flat, i, dim);
         std::vector<std::pair<float, uint32_t>> dists;
+        
+        // 计算到所有聚类中心的距离
         for (uint32_t j = 0; j < m; ++j) {
             dists.push_back({calculate_distance(point, final_centroids[j]), j});
         }
+        
+        // 按距离排序
         std::sort(dists.begin(), dists.end());
-        for (int k = 0; k < l; ++k) {
-            #pragma omp critical
-            buckets[dists[k].second].push_back(i);
+        
+        // 获取最近距离作为基准
+        float dist1 = dists[0].first;
+        size_t buckets_assigned = 0;
+        
+        // 应用距离比例约束的智能分桶策略
+        for (int k = 0; k < l && k < static_cast<int>(dists.size()); ++k) {
+            float dist_k = dists[k].first;
+            
+            // 第一个桶（最近的）总是分配
+            // 后续桶需要满足距离约束：beta * dist1 >= dist_k
+            if (k == 0 || (beta * dist1 >= dist_k)) {
+                #pragma omp critical
+                {
+                    buckets[dists[k].second].push_back(i);
+                }
+                buckets_assigned++;
+            } else {
+                // 距离约束不满足，停止分配
+                break;
+            }
         }
+        
+        total_bucket_assignments += buckets_assigned;
     }
 
+    double average_buckets_per_vector = static_cast<double>(total_bucket_assignments) / num_points;
     // --- Save Buckets & Metadata ---
     std::cout << "Saving bucket assignments and metadata..." << std::endl;
     save_buckets("buckets.bin", buckets);
     std::ofstream meta_writer("medoid_meta.txt");
     meta_writer << dim << std::endl;
     meta_writer << graph_degree << std::endl;
+    meta_writer << beta << std::endl;  // 保存beta参数到元数据
+    meta_writer << average_buckets_per_vector << std::endl;  // 保存平均分桶数
     meta_writer.close();
 
     // --- Build Medoid Vamana Graph ---
@@ -151,7 +184,17 @@ void build_mode(const std::string& data_path) {
     
     auto build_end_time = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> build_time = build_end_time - build_start_time;
-    
+
+    // 计算并输出分桶统计信息
+
+    std::cout << "Bucketing statistics:" << std::endl;
+    std::cout << "  Total vectors: " << num_points << std::endl;
+    std::cout << "  Total bucket assignments: " << total_bucket_assignments << std::endl;
+    std::cout << "  Average buckets per vector: " << std::fixed << std::setprecision(2) 
+              << average_buckets_per_vector << std::endl;
+    std::cout << "  Bucket utilization: " << std::fixed << std::setprecision(1) 
+              << (average_buckets_per_vector / l) * 100.0 << "% (vs " << l << " max)" << std::endl;
+
     std::cout << "Built " << buckets_built.load() << " bucket indices out of " << m << " total buckets." << std::endl;
     std::cout << "Total bucket build time: " << build_time.count() << " seconds" << std::endl;
     std::cout << "Average time per bucket: " << (buckets_built.load() > 0 ? build_time.count() / buckets_built.load() : 0) << " seconds" << std::endl;
@@ -169,19 +212,22 @@ void search_mode(const std::string& query_path, const std::string& gt_path) {
     // --- Load metadata ---
     size_t dim = 0;
     size_t graph_degree = 0;
+    float beta = 0.0f; // 新增：加载beta参数
+    double average_buckets_per_vector = 0.0; // 新增：加载平均分桶数
     std::ifstream meta_reader("medoid_meta.txt");
     if (!meta_reader.is_open()) {
         std::cerr << "FATAL: medoid_meta.txt not found. Please run build mode first." << std::endl;
         return;
     }
-    meta_reader >> dim >> graph_degree;
+    meta_reader >> dim >> graph_degree >> beta >> average_buckets_per_vector;
     meta_reader.close();
     
     if (dim == 0 || graph_degree == 0) {
         std::cerr << "FATAL: Failed to read metadata from medoid_meta.txt or metadata is invalid." << std::endl;
         return;
     }
-    std::cout << "Read metadata: dim=" << dim << ", graph_degree=" << graph_degree << std::endl;
+    std::cout << "Read metadata: dim=" << dim << ", graph_degree=" << graph_degree << ", beta=" << beta << std::endl;
+    std::cout << "Read metadata: average_buckets_per_vector=" << average_buckets_per_vector << std::endl;
 
 
     // --- Load Search Data ---
