@@ -27,7 +27,7 @@ void build_mode(const std::string& data_path) {
     const size_t m = 1024;
     const int t = 8;
     const int l = 3;
-    const float beta = 1.02f;  // 新增：距离比例约束参数
+    const float beta = 1.2f;  // 新增：距离比例约束参数
     const size_t graph_degree = 32;
     const size_t build_complexity = 50;
 
@@ -49,11 +49,8 @@ void build_mode(const std::string& data_path) {
     std::cout << "Using " << threads_per_build << " threads per index build (total CPU cores: " << max_threads << ")" << std::endl;
     std::cout << "Distance constraint parameter beta: " << beta << std::endl;
     std::cout << "bq mode: " << (use_bq ? "ON" : "OFF") << ", bits=" << bq_bits << std::endl;
-    if (use_bq && bq_bits != 1) {
-        std::cout << "[WARN] 当前实现的fastscan路径仅支持1bit紧凑码，暂时将 BQ_BITS 重置为 1。" << std::endl;
-        bq_bits = 1;
-    }
 
+    auto build_start_time = std::chrono::high_resolution_clock::now();
     // --- Load Data ---
     std::cout << "Loading data from " << data_path << "..." << std::endl;
     size_t num_points, dim;
@@ -156,7 +153,7 @@ void build_mode(const std::string& data_path) {
               << threads_per_bucket << " threads per bucket" << std::endl;
     
     std::atomic<size_t> buckets_built(0);
-    auto build_start_time = std::chrono::high_resolution_clock::now();
+    
     
     // 准备所有需要构建的bucket
     std::vector<size_t> buckets_to_build;
@@ -196,9 +193,6 @@ void build_mode(const std::string& data_path) {
             build_and_save_vamana_graph(bucket_data, {}, bucket_graph_path, graph_degree, build_complexity, threads_per_bucket);
         } else {
             // bq: 量化并保存量化文件，且不再构建子图
-            // 每桶唯一聚类中心
-            const float* centroid = final_centroids[i].data();
-            // rabitq total_bits 模式需要dim对齐到4（fastscan查表按4维）
             size_t padded_dim = (dim + 3) / 4 * 4;
             DataSet bucket_padded = bucket_data;
             if (padded_dim != dim) {
@@ -216,10 +210,9 @@ void build_mode(const std::string& data_path) {
                 out.write(reinterpret_cast<char*>(&pd), sizeof(uint64_t));
                 out.write(reinterpret_cast<char*>(&bits), sizeof(uint64_t));
                 out.write(reinterpret_cast<char*>(&n), sizeof(uint64_t));
-                // 为每向量写出压缩码与系数
                 using namespace rabitqlib::quant;
                 RabitqConfig cfg = faster_config(padded_dim, bq_bits);
-                // 仅支持1bit紧凑码路径：直接用 one_bit_batch_code 得到打包布局
+                // 1-bit打包与因子
                 std::vector<uint8_t> packed_codes((( (num + 31) & ~31ULL) / 32) * (padded_dim / 8) * 32);
                 std::vector<float> f_add(num), f_rescale(num), f_err(num);
 
@@ -246,6 +239,27 @@ void build_mode(const std::string& data_path) {
                 out.write(reinterpret_cast<const char*>(packed_codes.data()), packed_codes.size());
                 out.write(reinterpret_cast<const char*>(f_add.data()), sizeof(float) * num);
                 out.write(reinterpret_cast<const char*>(f_rescale.data()), sizeof(float) * num);
+
+                // 多bit时写出 ex_data（按 ExDataMap 布局）
+                if (bq_bits > 1) {
+                    size_t ex_bits = bq_bits - 1;
+                    size_t ex_stride = rabitqlib::ExDataMap<float>::data_bytes(padded_dim, ex_bits);
+                    std::vector<uint8_t> ex_blob(ex_stride * num);
+                    char* ex_ptr = reinterpret_cast<char*>(ex_blob.data());
+                    for (size_t r = 0; r < num; ++r) {
+                        rabitqlib::quant::quantize_compact_ex_bits<float>(
+                            flat_data.data() + r * padded_dim,
+                            centroid_pad.data(),
+                            padded_dim,
+                            ex_bits,
+                            ex_ptr,
+                            rabitqlib::METRIC_L2,
+                            cfg
+                        );
+                        ex_ptr += ex_stride;
+                    }
+                    out.write(reinterpret_cast<const char*>(ex_blob.data()), ex_blob.size());
+                }
                 out.close();
             }
         }
@@ -284,7 +298,7 @@ void search_mode(const std::string& query_path, const std::string& gt_path) {
     std::cout << "\n--- Running in SEARCH mode ---" << std::endl;
 
     // --- Parameters ---
-    const int f = 3; // Number of buckets to search
+    const int f = 2; // Number of buckets to search
     const int k = 50; // Number of neighbors to retrieve per bucket
     const int num_threads = std::thread::hardware_concurrency();
 

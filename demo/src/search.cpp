@@ -13,6 +13,7 @@
 #include "/home/danbai.wq/DiskANN/rabitq/rabitqlib/quantization/data_layout.hpp"
 #include "/home/danbai.wq/DiskANN/rabitq/rabitqlib/fastscan/fastscan.hpp"
 #include "/home/danbai.wq/DiskANN/rabitq/rabitqlib/index/query.hpp"
+#include "/home/danbai.wq/DiskANN/rabitq/rabitqlib/utils/space.hpp"
 
 std::shared_ptr<diskann::Index<float, uint32_t, uint32_t>> load_index(const std::string& index_path, const size_t dim) {
     if (!std::ifstream(index_path).good()) {
@@ -183,6 +184,8 @@ struct BQBucketData {
     std::vector<uint8_t> bin_codes;   // packed codes
     std::vector<float> f_add;
     std::vector<float> f_rescale;
+    // ex data（可选）
+    std::vector<uint8_t> ex_blob;
 };
 
 static bool load_bq_bucket(uint32_t bucket_id, BQBucketData& out) {
@@ -205,6 +208,13 @@ static bool load_bq_bucket(uint32_t bucket_id, BQBucketData& out) {
     in.read(reinterpret_cast<char*>(out.bin_codes.data()), code_bytes);
     in.read(reinterpret_cast<char*>(out.f_add.data()), sizeof(float) * out.num_points);
     in.read(reinterpret_cast<char*>(out.f_rescale.data()), sizeof(float) * out.num_points);
+
+    // 读取 ex_data（若存在）
+    if (out.bits > 1) {
+        size_t ex_stride = rabitqlib::ExDataMap<float>::data_bytes(out.padded_dim, out.bits - 1);
+        out.ex_blob.resize(ex_stride * out.num_points);
+        in.read(reinterpret_cast<char*>(out.ex_blob.data()), out.ex_blob.size());
+    }
     return true;
 }
 
@@ -250,7 +260,7 @@ QueryResult search_two_stage(
             }
         }
     } else {
-        // bq 模式：按桶加载量化数据，使用 fastscan + 正确的估计公式
+        // bq 模式：按桶加载量化数据，使用 fastscan + 正确的估计公式；若 bits>1 再进行 ex_bits boosting
         for (uint32_t bucket_id : nearest_bucket_ids) {
             BQBucketData bd;
             if (!load_bq_bucket(bucket_id, bd) || bd.num_points == 0) continue;
@@ -261,17 +271,16 @@ QueryResult search_two_stage(
             std::vector<float> q_pad(bd.padded_dim, 0.0f);
             std::copy(query.begin(), query.end(), q_pad.begin());
 
-            rabitqlib::BatchQuery<float> qobj(q_pad.data(), bd.padded_dim);
-            // g_add = ||q||^2
-            float qnorm2 = 0.0f;
-            for (size_t d = 0; d < dim; ++d) qnorm2 += query[d] * query[d];
-            qobj.set_g_add(qnorm2);
+            size_t ex_bits = bd.bits > 1 ? (bd.bits - 1) : 0;
+            rabitqlib::SplitBatchQuery<float> qobj(q_pad.data(), bd.padded_dim, ex_bits, rabitqlib::METRIC_L2, false);
+            float qnorm2 = 0.0f; for (size_t d = 0; d < dim; ++d) qnorm2 += query[d] * query[d];
+            float qnorm = std::sqrt(qnorm2);
+            qobj.set_g_add(qnorm, 0.0f);
 
             std::vector<std::pair<float, uint32_t>> local_cand;
             local_cand.reserve(std::min(k, num));
 
             std::array<uint16_t, rabitqlib::fastscan::kBatchSize> accu{};
-            std::vector<float> ip_x0_qr(32, 0.0f);
 
             size_t num_rd = (num + 31) & ~31ULL;
             size_t batches = num_rd / 32;
@@ -284,8 +293,21 @@ QueryResult search_two_stage(
                 for (size_t i = 0; i < batch; ++i) {
                     size_t idx = base + i;
                     float ip_est = qobj.delta() * static_cast<float>(accu[i]) + qobj.sum_vl_lut();
-                    float dist = bd.f_add[idx] + qobj.g_add() + bd.f_rescale[idx] * (ip_est + qobj.k1xsumq());
-                    local_cand.emplace_back(dist, static_cast<uint32_t>(idx));
+                    float dist_est = bd.f_add[idx] + qobj.g_add() + bd.f_rescale[idx] * (ip_est + qobj.k1xsumq());
+
+                    // ex_bits boosting（如果存在 ex_data）
+                    if (bd.bits > 1 && !bd.ex_blob.empty()) {
+                        size_t ex_bits = bd.bits - 1;
+                        size_t ex_stride = rabitqlib::ExDataMap<float>::data_bytes(bd.padded_dim, ex_bits);
+                        const char* ex_ptr = reinterpret_cast<const char*>(bd.ex_blob.data()) + (idx * ex_stride);
+                        auto ip_func = rabitqlib::select_excode_ipfunc(ex_bits);
+                        rabitqlib::ConstExDataMap<float> ex_map(ex_ptr, bd.padded_dim, ex_bits);
+                        float ex_dist = ex_map.f_add_ex() + qobj.g_add() + (ex_map.f_rescale_ex() *
+                            (static_cast<float>(1 << ex_bits) * (ip_est) + ip_func(q_pad.data(), ex_map.ex_code(), bd.padded_dim) + qobj.kbxsumq()));
+                        dist_est = ex_dist;
+                    }
+
+                    local_cand.emplace_back(dist_est, static_cast<uint32_t>(idx));
                 }
             }
 

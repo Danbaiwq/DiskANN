@@ -707,3 +707,75 @@ ls demo/demo_test
 - **工程突破**: 在保持内存限制和索引质量的前提下实现性能突破
 
 这种设计理念可以广泛应用于其他需要高并发访问缓存资源的系统中，具有重要的工程价值和学术意义。 
+
+---
+
+## 7. BQ 量化优化（RaBitQ 集成）
+
+为改善高维场景下的 QPS 与内存占用，新增可选的 BQ 量化（RaBitQ）优化路径，用量化后的向量替代原始向量进行桶内检索。
+
+### 7.1 总览
+- 模式开关：通过环境变量启用
+  - `USE_BQ=1` 开启量化模式；`USE_BQ=0` 使用原始向量（默认）
+  - `BQ_BITS=1..8` 设置总量化比特数。实现采用“1bit 基码 + (BQ_BITS-1) ex_bits”策略
+- 元数据扩展：`medoid_meta.txt` 增加 `use_bq` 与 `bits` 字段
+
+### 7.2 构建流程（桶内量化）
+- 保持 KMeans 分桶不变
+- 每个桶：
+  1) 对每个向量与其所属桶的聚类中心做 1bit 量化，并使用 fastscan 的批处理布局打包
+  2) 记录每向量的 `f_add`、`f_rescale`
+  3) 若 `BQ_BITS>1`：额外为每个向量生成 ex_bits（`ex_bits=BQ_BITS-1`）并压缩为 `ExDataMap` 布局
+- 输出文件（每桶一个）：`bucket_<i>_bq.bin`
+  - Header: `uint64 padded_dim, uint64 bits, uint64 num`
+  - Body:
+    - 1bit packed codes（fastscan 批处理布局）
+    - `f_add[num]`、`f_rescale[num]`
+    - 若 `bits>1`：追加 ex_data（按 `ExDataMap` 连续布局排列）
+
+### 7.3 查询流程（两阶段 + 量化桶内检索）
+- 第一阶段（不变）：在 `medoid_vamana.index` 上搜索得到最相近的 `f` 个桶 ID
+- 第二阶段（变化）：
+  - 原始模式：加载 `bucket_*_vamana.index` 在子图上检索
+  - BQ 模式：按桶读取 `bucket_*_bq.bin`
+    1) 使用 `SplitBatchQuery` 基于查询向量构建 LUT 与必要参数（`delta`, `sum_vl_lut`, `k1xsumq`, `g_add=||q||^2`）
+    2) 用 fastscan 对 1bit packed codes 累积得到 `accu`，一比特估计：
+       - `ip_est = delta * accu + sum_vl_lut`
+       - `dist_est = f_add + g_add + f_rescale * (ip_est + k1xsumq)`
+    3) 若 `bits>1`：使用 ex_bits 提升精度（boosting）：
+       - 取对应向量的 ex_data，选择 `ip_func = select_excode_ipfunc(ex_bits)`
+       - `dist_boosted = f_add_ex + g_add + f_rescale_ex * ( (1<<ex_bits)*ip_est + ip_func(q, ex_code, padded_dim) + kbxsumq )`
+       - 用 `dist_boosted` 替换 `dist_est`
+    4) 按桶选取 `k` 个候选（不足则全取），映射为全局ID后合并、全局排序取 `top_k`
+
+### 7.4 构建与运行命令
+在仓库根目录统一构建：
+```bash
+cd /home/danbai.wq/DiskANN
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j $(nproc)
+```
+原始 RAW 模式：
+```bash
+cd build
+./demo/demo_test /path/to/base.fbin
+./demo/demo_test /path/to/query.fbin /path/to/ground_truth.ivecs
+```
+BQ 模式（示例 4bit）：
+```bash
+cd build
+USE_BQ=1 BQ_BITS=4 ./demo/demo_test /path/to/base.fbin
+./demo/demo_test /path/to/query.fbin /path/to/ground_truth.ivecs
+```
+
+### 7.5 参数建议
+- `BQ_BITS`：推荐 4bit，在 SIFT 等数据集上可显著提升召回
+- `f`：增大可提升召回（如 5/10/16），但增加耗时
+- `k`：每桶候选数，适度增大会提升 recall@top_k
+- `beta`：分桶严格度，过大可能降低召回，建议 1.0~1.05/1.1 之间调参
+
+### 7.6 注意事项
+- 维度对齐：fastscan LUT 按 4 维分组，`padded_dim = ceil(dim/4)*4`
+- 文件路径：所有输出（`medoid_vamana.index`, `buckets.bin`, `bucket_*_vamana.index`, `bucket_*_bq.bin`, `medoid_meta.txt`）建议放在 `build/` 下
+- 内存与并发：构建时每桶文件独立写入，避免跨线程共享缓冲；查询时按需加载 bq 文件并在内存中计算
+- 模式共存：同一目录可同时存在 RAW 与 BQ 文件，互不覆盖、互不依赖 
