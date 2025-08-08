@@ -65,7 +65,8 @@ QueryResult search_two_stage(
     size_t k,
     size_t top_k,
     IndexCache& index_cache,
-    size_t dim
+    size_t dim,
+    bool use_bq // 新增：是否使用bq量化向量查询
 );
 
 // Calculate recall

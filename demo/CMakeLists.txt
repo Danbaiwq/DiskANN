@@ -22,5 +22,8 @@ target_include_directories(demo_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../incl
 # Assumes diskann library has been built.
 target_link_libraries(demo_test PRIVATE Threads::Threads OpenMP::OpenMP_CXX diskann)
 
+# rabitq headers
+include_directories(/home/danbai.wq/DiskANN/rabitq/rabitqlib)
+
 # Add compiler flags for AVX2 and FMA support for performance
 target_compile_options(demo_test PRIVATE -mavx2 -mfma)

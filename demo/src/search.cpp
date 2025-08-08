@@ -8,6 +8,12 @@
 #include "parameters.h"
 #include "kmeans.h"
 
+// rabitq 量化依赖
+#include "/home/danbai.wq/DiskANN/rabitq/rabitqlib/quantization/rabitq.hpp"
+#include "/home/danbai.wq/DiskANN/rabitq/rabitqlib/quantization/data_layout.hpp"
+#include "/home/danbai.wq/DiskANN/rabitq/rabitqlib/fastscan/fastscan.hpp"
+#include "/home/danbai.wq/DiskANN/rabitq/rabitqlib/index/query.hpp"
+
 std::shared_ptr<diskann::Index<float, uint32_t, uint32_t>> load_index(const std::string& index_path, const size_t dim) {
     if (!std::ifstream(index_path).good()) {
         return nullptr;
@@ -169,6 +175,39 @@ void IndexCache::put_locked(uint32_t key, IndexPtr index) {
     }
 }
 
+// 简单的bq桶数据结构（按桶保存一次读取的数据）
+struct BQBucketData {
+    size_t padded_dim{0};
+    size_t bits{4};
+    size_t num_points{0};
+    std::vector<uint8_t> bin_codes;   // packed codes
+    std::vector<float> f_add;
+    std::vector<float> f_rescale;
+};
+
+static bool load_bq_bucket(uint32_t bucket_id, BQBucketData& out) {
+    std::string path = "bucket_" + std::to_string(bucket_id) + "_bq.bin";
+    std::ifstream in(path, std::ios::binary);
+    if (!in.is_open()) return false;
+    uint64_t pd, bits, n;
+    in.read(reinterpret_cast<char*>(&pd), sizeof(uint64_t));
+    in.read(reinterpret_cast<char*>(&bits), sizeof(uint64_t));
+    in.read(reinterpret_cast<char*>(&n), sizeof(uint64_t));
+    out.padded_dim = static_cast<size_t>(pd);
+    out.bits = static_cast<size_t>(bits);
+    out.num_points = static_cast<size_t>(n);
+    size_t cols = out.padded_dim / 8;
+    size_t num_rd = (out.num_points + 31) & ~31ULL;
+    size_t code_bytes = (num_rd / 32) * cols * 32;
+    out.bin_codes.resize(code_bytes);
+    out.f_add.resize(out.num_points);
+    out.f_rescale.resize(out.num_points);
+    in.read(reinterpret_cast<char*>(out.bin_codes.data()), code_bytes);
+    in.read(reinterpret_cast<char*>(out.f_add.data()), sizeof(float) * out.num_points);
+    in.read(reinterpret_cast<char*>(out.f_rescale.data()), sizeof(float) * out.num_points);
+    return true;
+}
+
 QueryResult search_two_stage(
     const std::vector<float>& query,
     diskann::Index<float, uint32_t, uint32_t>& medoid_index,
@@ -177,7 +216,8 @@ QueryResult search_two_stage(
     size_t k,
     size_t top_k,
     IndexCache& index_cache,
-    size_t dim
+    size_t dim,
+    bool use_bq
 ) {
     // 第一步：在medoid_vamana查找最近的bucket_id
     std::vector<uint32_t> nearest_bucket_ids(f);
@@ -185,28 +225,81 @@ QueryResult search_two_stage(
 
     std::vector<std::pair<float, uint32_t>> candidates;
     std::set<uint32_t> visited_ids;
-    
-    // 第二步和第三步：使用非阻塞缓存访问
-    for (uint32_t bucket_id : nearest_bucket_ids) {
-        auto bucket_index = index_cache.get_non_blocking(bucket_id);  // 使用非阻塞方法
-        if (bucket_index) {
-            size_t actual_k = std::min(k, bucket_index->get_num_points());
-            if (actual_k == 0) continue;
 
-            std::vector<uint32_t> result_tags(actual_k);
-            std::vector<float> result_dists(actual_k);
-            bucket_index->search(query.data(), actual_k, actual_k, result_tags.data(), result_dists.data());
+    if (!use_bq) {
+        // 原始raw逻辑：使用每桶Vamana子图
+        for (uint32_t bucket_id : nearest_bucket_ids) {
+            auto bucket_index = index_cache.get_non_blocking(bucket_id);  // 使用非阻塞方法
+            if (bucket_index) {
+                size_t actual_k = std::min(k, bucket_index->get_num_points());
+                if (actual_k == 0) continue;
 
-            for (size_t i = 0; i < actual_k; ++i) {
-                // The tag returned is a LOCAL index within the bucket
-                uint32_t local_idx = result_tags[i];
-                
-                // Check bounds before accessing buckets
+                std::vector<uint32_t> result_tags(actual_k);
+                std::vector<float> result_dists(actual_k);
+                bucket_index->search(query.data(), actual_k, actual_k, result_tags.data(), result_dists.data());
+
+                for (size_t i = 0; i < actual_k; ++i) {
+                    uint32_t local_idx = result_tags[i];
+                    if (local_idx < buckets[bucket_id].size()) {
+                        uint32_t global_id = buckets[bucket_id][local_idx];
+                        if (visited_ids.insert(global_id).second) {
+                            candidates.emplace_back(result_dists[i], global_id);
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        // bq 模式：按桶加载量化数据，使用 fastscan + 正确的估计公式
+        for (uint32_t bucket_id : nearest_bucket_ids) {
+            BQBucketData bd;
+            if (!load_bq_bucket(bucket_id, bd) || bd.num_points == 0) continue;
+            size_t code_cols = bd.padded_dim / 8;
+            size_t num = bd.num_points;
+
+            // 准备查询：pad 到 padded_dim
+            std::vector<float> q_pad(bd.padded_dim, 0.0f);
+            std::copy(query.begin(), query.end(), q_pad.begin());
+
+            rabitqlib::BatchQuery<float> qobj(q_pad.data(), bd.padded_dim);
+            // g_add = ||q||^2
+            float qnorm2 = 0.0f;
+            for (size_t d = 0; d < dim; ++d) qnorm2 += query[d] * query[d];
+            qobj.set_g_add(qnorm2);
+
+            std::vector<std::pair<float, uint32_t>> local_cand;
+            local_cand.reserve(std::min(k, num));
+
+            std::array<uint16_t, rabitqlib::fastscan::kBatchSize> accu{};
+            std::vector<float> ip_x0_qr(32, 0.0f);
+
+            size_t num_rd = (num + 31) & ~31ULL;
+            size_t batches = num_rd / 32;
+            for (size_t b = 0; b < batches; ++b) {
+                const uint8_t* codes = bd.bin_codes.data() + b * (code_cols * 32);
+                rabitqlib::fastscan::accumulate(codes, qobj.lut(), accu.data(), bd.padded_dim);
+
+                size_t base = b * 32;
+                size_t batch = std::min<size_t>(32, num - base);
+                for (size_t i = 0; i < batch; ++i) {
+                    size_t idx = base + i;
+                    float ip_est = qobj.delta() * static_cast<float>(accu[i]) + qobj.sum_vl_lut();
+                    float dist = bd.f_add[idx] + qobj.g_add() + bd.f_rescale[idx] * (ip_est + qobj.k1xsumq());
+                    local_cand.emplace_back(dist, static_cast<uint32_t>(idx));
+                }
+            }
+
+            size_t want = std::min(k, local_cand.size());
+            if (local_cand.size() > want) {
+                std::nth_element(local_cand.begin(), local_cand.begin() + want, local_cand.end());
+                local_cand.resize(want);
+            }
+            for (auto& p : local_cand) {
+                uint32_t local_idx = p.second;
                 if (local_idx < buckets[bucket_id].size()) {
                     uint32_t global_id = buckets[bucket_id][local_idx];
-                    if (visited_ids.find(global_id) == visited_ids.end()) {
-                        candidates.push_back({result_dists[i], global_id});
-                        visited_ids.insert(global_id);
+                    if (visited_ids.insert(global_id).second) {
+                        candidates.emplace_back(p.first, global_id);
                     }
                 }
             }

@@ -14,6 +14,11 @@
 #include "vamana_graph.h"
 #include "search.h"
 
+// rabitq 量化接口（构建阶段用）
+#include "/home/danbai.wq/DiskANN/rabitq/rabitqlib/quantization/rabitq.hpp"
+#include "/home/danbai.wq/DiskANN/rabitq/rabitqlib/quantization/data_layout.hpp"
+#include "/home/danbai.wq/DiskANN/rabitq/rabitqlib/fastscan/fastscan.hpp"
+
 void build_mode(const std::string& data_path) {
     std::cout << "\n--- Running in BUILD mode ---" << std::endl;
 
@@ -22,9 +27,20 @@ void build_mode(const std::string& data_path) {
     const size_t m = 1024;
     const int t = 8;
     const int l = 3;
-    const float beta = 1.2f;  // 新增：距离比例约束参数
+    const float beta = 1.02f;  // 新增：距离比例约束参数
     const size_t graph_degree = 32;
     const size_t build_complexity = 50;
+
+    // bq 开关与bits（默认从环境变量读取，不存在则默认关闭bq）
+    bool use_bq = false;
+    size_t bq_bits = 4; // 1~8，默认4
+    if (const char* env = std::getenv("USE_BQ")) {
+        use_bq = (std::string(env) == "1" || std::string(env) == "true");
+    }
+    if (const char* envb = std::getenv("BQ_BITS")) {
+        bq_bits = std::max<size_t>(1, std::min<size_t>(8, std::stoul(envb)));
+    }
+
     
     // 获取可用线程数，但为每个索引构建留一些余量
     const size_t max_threads = std::thread::hardware_concurrency();
@@ -32,6 +48,11 @@ void build_mode(const std::string& data_path) {
     
     std::cout << "Using " << threads_per_build << " threads per index build (total CPU cores: " << max_threads << ")" << std::endl;
     std::cout << "Distance constraint parameter beta: " << beta << std::endl;
+    std::cout << "bq mode: " << (use_bq ? "ON" : "OFF") << ", bits=" << bq_bits << std::endl;
+    if (use_bq && bq_bits != 1) {
+        std::cout << "[WARN] 当前实现的fastscan路径仅支持1bit紧凑码，暂时将 BQ_BITS 重置为 1。" << std::endl;
+        bq_bits = 1;
+    }
 
     // --- Load Data ---
     std::cout << "Loading data from " << data_path << "..." << std::endl;
@@ -115,6 +136,8 @@ void build_mode(const std::string& data_path) {
     meta_writer << graph_degree << std::endl;
     meta_writer << beta << std::endl;  // 保存beta参数到元数据
     meta_writer << average_buckets_per_vector << std::endl;  // 保存平均分桶数
+    meta_writer << (use_bq ? 1 : 0) << std::endl; // 是否使用bq
+    meta_writer << bq_bits << std::endl; // bq bits
     meta_writer.close();
 
     // --- Build Medoid Vamana Graph ---
@@ -168,8 +191,64 @@ void build_mode(const std::string& data_path) {
         
         std::string bucket_graph_path = "bucket_" + std::to_string(i) + "_vamana.index";
         
-        // 传递空的tags，让DiskANN使用局部ID，每个bucket使用分配的线程数
-        build_and_save_vamana_graph(bucket_data, {}, bucket_graph_path, graph_degree, build_complexity, threads_per_bucket);
+        if (!use_bq) {
+            // 原始构图
+            build_and_save_vamana_graph(bucket_data, {}, bucket_graph_path, graph_degree, build_complexity, threads_per_bucket);
+        } else {
+            // bq: 量化并保存量化文件，且不再构建子图
+            // 每桶唯一聚类中心
+            const float* centroid = final_centroids[i].data();
+            // rabitq total_bits 模式需要dim对齐到4（fastscan查表按4维）
+            size_t padded_dim = (dim + 3) / 4 * 4;
+            DataSet bucket_padded = bucket_data;
+            if (padded_dim != dim) {
+                for (auto& v : bucket_padded) v.resize(padded_dim, 0.0f);
+            }
+            const size_t num = bucket_padded.size();
+            // 输出文件：bucket_i_bq.bin
+            std::string bq_path = "bucket_" + std::to_string(i) + "_bq.bin";
+            std::ofstream out(bq_path, std::ios::binary);
+            if (!out.is_open()) {
+                #pragma omp critical
+                std::cerr << "Failed to open " << bq_path << " for write" << std::endl;
+            } else {
+                uint64_t pd = padded_dim, bits = bq_bits, n = num;
+                out.write(reinterpret_cast<char*>(&pd), sizeof(uint64_t));
+                out.write(reinterpret_cast<char*>(&bits), sizeof(uint64_t));
+                out.write(reinterpret_cast<char*>(&n), sizeof(uint64_t));
+                // 为每向量写出压缩码与系数
+                using namespace rabitqlib::quant;
+                RabitqConfig cfg = faster_config(padded_dim, bq_bits);
+                // 仅支持1bit紧凑码路径：直接用 one_bit_batch_code 得到打包布局
+                std::vector<uint8_t> packed_codes((( (num + 31) & ~31ULL) / 32) * (padded_dim / 8) * 32);
+                std::vector<float> f_add(num), f_rescale(num), f_err(num);
+
+                // 将桶内数据展平为连续内存，并补零到 padded_dim
+                std::vector<float> flat_data(num * padded_dim, 0.0f);
+                for (size_t r = 0; r < num; ++r) {
+                    std::copy(bucket_padded[r].begin(), bucket_padded[r].end(), flat_data.begin() + r * padded_dim);
+                }
+                // 生成 padded 的 centroid
+                std::vector<float> centroid_pad(padded_dim, 0.0f);
+                std::copy(final_centroids[i].begin(), final_centroids[i].end(), centroid_pad.begin());
+
+                rabitqlib::quant::rabitq_impl::one_bit::one_bit_batch_code<float, false>(
+                    flat_data.data(),
+                    centroid_pad.data(),
+                    num,
+                    padded_dim,
+                    packed_codes.data(),
+                    f_add.data(),
+                    f_rescale.data(),
+                    f_err.data(),
+                    rabitqlib::METRIC_L2
+                );
+                out.write(reinterpret_cast<const char*>(packed_codes.data()), packed_codes.size());
+                out.write(reinterpret_cast<const char*>(f_add.data()), sizeof(float) * num);
+                out.write(reinterpret_cast<const char*>(f_rescale.data()), sizeof(float) * num);
+                out.close();
+            }
+        }
         
         // 原子操作更新计数器
         buckets_built.fetch_add(1);
@@ -205,7 +284,7 @@ void search_mode(const std::string& query_path, const std::string& gt_path) {
     std::cout << "\n--- Running in SEARCH mode ---" << std::endl;
 
     // --- Parameters ---
-    const int f = 2; // Number of buckets to search
+    const int f = 3; // Number of buckets to search
     const int k = 50; // Number of neighbors to retrieve per bucket
     const int num_threads = std::thread::hardware_concurrency();
 
@@ -214,12 +293,14 @@ void search_mode(const std::string& query_path, const std::string& gt_path) {
     size_t graph_degree = 0;
     float beta = 0.0f; // 新增：加载beta参数
     double average_buckets_per_vector = 0.0; // 新增：加载平均分桶数
+    int use_bq_flag = 0; // 新增：是否使用bq
+    size_t bq_bits = 4;  // 新增：bq bits
     std::ifstream meta_reader("medoid_meta.txt");
     if (!meta_reader.is_open()) {
         std::cerr << "FATAL: medoid_meta.txt not found. Please run build mode first." << std::endl;
         return;
     }
-    meta_reader >> dim >> graph_degree >> beta >> average_buckets_per_vector;
+    meta_reader >> dim >> graph_degree >> beta >> average_buckets_per_vector >> use_bq_flag >> bq_bits;
     meta_reader.close();
     
     if (dim == 0 || graph_degree == 0) {
@@ -228,6 +309,7 @@ void search_mode(const std::string& query_path, const std::string& gt_path) {
     }
     std::cout << "Read metadata: dim=" << dim << ", graph_degree=" << graph_degree << ", beta=" << beta << std::endl;
     std::cout << "Read metadata: average_buckets_per_vector=" << average_buckets_per_vector << std::endl;
+    std::cout << "Read metadata: use_bq=" << use_bq_flag << ", bits=" << bq_bits << std::endl;
 
 
     // --- Load Search Data ---
@@ -271,7 +353,7 @@ void search_mode(const std::string& query_path, const std::string& gt_path) {
     std::cout << "LRU index cache initialized with a " << cache_size_bytes / (1024*1024) << "MB budget." << std::endl;
 
     // --- Parameters for Search Evaluation ---
-    std::vector<size_t> f_values = {f};
+    std::vector<size_t> f_values = {static_cast<size_t>(f)};
     size_t top_k = 100;
     std::vector<uint32_t> recall_k_values = {10, 50, 100};
 
@@ -284,7 +366,7 @@ void search_mode(const std::string& query_path, const std::string& gt_path) {
         #pragma omp parallel for
         for (size_t i = 0; i < num_queries; ++i) {
             DataPoint query = get_point_copy(queries_flat, i, dim);
-            results[i] = search_two_stage(query, *medoid_index, buckets, f_val, k, top_k, bucket_index_cache, dim);
+            results[i] = search_two_stage(query, *medoid_index, buckets, f_val, k, top_k, bucket_index_cache, dim, use_bq_flag == 1);
         }
         auto end_time = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> diff = end_time - start_time;
