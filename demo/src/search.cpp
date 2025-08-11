@@ -4,6 +4,8 @@
 #include <vector>
 #include <set>
 #include <algorithm>
+#include <queue>
+#include <limits>
 #include "index.h"
 #include "parameters.h"
 #include "kmeans.h"
@@ -218,6 +220,141 @@ static bool load_bq_bucket(uint32_t bucket_id, BQBucketData& out) {
     return true;
 }
 
+// 新增：大桶 BQ 图数据结构与加载器
+struct BQGraphData {
+    size_t padded_dim{0};
+    size_t bits{4};
+    size_t num_points{0};
+    size_t degree{0};
+    std::vector<uint8_t> bin_codes;   // packed codes
+    std::vector<float> f_add;
+    std::vector<float> f_rescale;
+    std::vector<uint8_t> ex_blob;     // 可选
+    std::vector<uint32_t> adj;        // 邻接表（按行存储，num_points * degree）
+};
+
+static bool load_bq_graph(uint32_t bucket_id, BQGraphData& g) {
+    std::string path = "bucket_" + std::to_string(bucket_id) + "_bqgraph.bin";
+    std::ifstream in(path, std::ios::binary);
+    if (!in.is_open()) return false;
+    uint64_t pd, bits, n, deg;
+    in.read(reinterpret_cast<char*>(&pd), sizeof(uint64_t));
+    in.read(reinterpret_cast<char*>(&bits), sizeof(uint64_t));
+    in.read(reinterpret_cast<char*>(&n), sizeof(uint64_t));
+    in.read(reinterpret_cast<char*>(&deg), sizeof(uint64_t));
+    g.padded_dim = static_cast<size_t>(pd);
+    g.bits = static_cast<size_t>(bits);
+    g.num_points = static_cast<size_t>(n);
+    g.degree = static_cast<size_t>(deg);
+    size_t cols = g.padded_dim / 8;
+    size_t num_rd = (g.num_points + 31) & ~31ULL;
+    size_t code_bytes = (num_rd / 32) * cols * 32;
+    g.bin_codes.resize(code_bytes);
+    g.f_add.resize(g.num_points);
+    g.f_rescale.resize(g.num_points);
+    in.read(reinterpret_cast<char*>(g.bin_codes.data()), code_bytes);
+    in.read(reinterpret_cast<char*>(g.f_add.data()), sizeof(float) * g.num_points);
+    in.read(reinterpret_cast<char*>(g.f_rescale.data()), sizeof(float) * g.num_points);
+    // ex_data（若存在则剩余区间为 ex_blob + 邻接表）
+    // 剩余字节数 = 总文件 - 已读；但这里简单按 bits 判断是否有 ex_blob
+    if (g.bits > 1) {
+        size_t ex_stride = rabitqlib::ExDataMap<float>::data_bytes(g.padded_dim, g.bits - 1);
+        g.ex_blob.resize(ex_stride * g.num_points);
+        in.read(reinterpret_cast<char*>(g.ex_blob.data()), g.ex_blob.size());
+    }
+    g.adj.resize(g.num_points * g.degree);
+    in.read(reinterpret_cast<char*>(g.adj.data()), sizeof(uint32_t) * g.adj.size());
+    return true;
+}
+
+// 使用 BQ 距离在图上进行近邻搜索（简化版：贪心+候选队列）
+static void bq_graph_search(
+    uint32_t bucket_id,
+    const std::vector<float>& query,
+    size_t orig_dim,
+    size_t k,
+    std::vector<std::pair<float, uint32_t>>& out_local_cand
+) {
+    BQGraphData G;
+    if (!load_bq_graph(bucket_id, G) || G.num_points == 0) return;
+
+    // 构造查询对象
+    std::vector<float> q_pad(G.padded_dim, 0.0f);
+    std::copy(query.begin(), query.end(), q_pad.begin());
+    size_t ex_bits = G.bits > 1 ? (G.bits - 1) : 0;
+    rabitqlib::SplitBatchQuery<float> qobj(q_pad.data(), G.padded_dim, ex_bits, rabitqlib::METRIC_L2, false);
+    float qnorm2 = 0.0f; for (size_t d = 0; d < orig_dim; ++d) qnorm2 += query[d] * query[d];
+    float qnorm = std::sqrt(qnorm2);
+    qobj.set_g_add(qnorm, 0.0f);
+
+    const size_t code_cols = G.padded_dim / 8;
+
+    auto eval_dist = [&](uint32_t idx)->float {
+        size_t base = (idx / 32) * 32;
+        size_t pos = idx % 32;
+        const uint8_t* codes = G.bin_codes.data() + (base / 32) * (code_cols * 32);
+        std::array<uint16_t, rabitqlib::fastscan::kBatchSize> accu{};
+        rabitqlib::fastscan::accumulate(codes, qobj.lut(), accu.data(), G.padded_dim);
+        float ip_est = qobj.delta() * static_cast<float>(accu[pos]) + qobj.sum_vl_lut();
+        float dist_est = G.f_add[idx] + qobj.g_add() + G.f_rescale[idx] * (ip_est + qobj.k1xsumq());
+        if (G.bits > 1 && !G.ex_blob.empty()) {
+            size_t ex_stride = rabitqlib::ExDataMap<float>::data_bytes(G.padded_dim, ex_bits);
+            const char* ex_ptr = reinterpret_cast<const char*>(G.ex_blob.data()) + (idx * ex_stride);
+            auto ip_func = rabitqlib::select_excode_ipfunc(ex_bits);
+            rabitqlib::ConstExDataMap<float> ex_map(ex_ptr, G.padded_dim, ex_bits);
+            float ex_dist = ex_map.f_add_ex() + qobj.g_add() + (ex_map.f_rescale_ex() *
+                (static_cast<float>(1 << ex_bits) * (ip_est) + ip_func(q_pad.data(), ex_map.ex_code(), G.padded_dim) + qobj.kbxsumq()));
+            dist_est = ex_dist;
+        }
+        return dist_est;
+    };
+
+    // 简单的多源启动：选择若干均匀间隔的起点（避免依赖入口）
+    std::vector<uint32_t> entry_points;
+    if (G.num_points > 0) {
+        entry_points.push_back(0);
+        if (G.num_points > 1024) entry_points.push_back(G.num_points / 2);
+        if (G.num_points > 1) entry_points.push_back(G.num_points - 1);
+    }
+
+    std::vector<char> visited(G.num_points, 0);
+    using Node = std::pair<float, uint32_t>; // (dist, id)
+    auto cmp = [](const Node& a, const Node& b){ return a.first > b.first; };
+    std::priority_queue<Node, std::vector<Node>, decltype(cmp)> cand_queue(cmp);
+
+    for (auto ep : entry_points) {
+        if (ep < G.num_points && !visited[ep]) {
+            float d = eval_dist(ep);
+            cand_queue.emplace(d, ep);
+        }
+    }
+
+    std::vector<Node> best;
+    best.reserve(k);
+
+    while (!cand_queue.empty() && best.size() < k * 10) { // 适度扩展
+        auto [cd, u] = cand_queue.top();
+        cand_queue.pop();
+        if (visited[u]) continue;
+        visited[u] = 1;
+        best.emplace_back(cd, u);
+
+        // 扩展邻居
+        for (size_t t = 0; t < G.degree; ++t) {
+            uint32_t v = G.adj[u * G.degree + t];
+            if (v >= G.num_points || visited[v]) continue;
+            float dv = eval_dist(v);
+            cand_queue.emplace(dv, v);
+        }
+    }
+
+    // 选前 k 个
+    size_t want = std::min(k, best.size());
+    std::nth_element(best.begin(), best.begin() + want, best.end());
+    best.resize(want);
+    out_local_cand.insert(out_local_cand.end(), best.begin(), best.end());
+}
+
 QueryResult search_two_stage(
     const std::vector<float>& query,
     diskann::Index<float, uint32_t, uint32_t>& medoid_index,
@@ -227,7 +364,8 @@ QueryResult search_two_stage(
     size_t top_k,
     IndexCache& index_cache,
     size_t dim,
-    bool use_bq
+    bool use_bq,
+    size_t bq_graph_threshold
 ) {
     // 第一步：在medoid_vamana查找最近的bucket_id
     std::vector<uint32_t> nearest_bucket_ids(f);
@@ -260,8 +398,29 @@ QueryResult search_two_stage(
             }
         }
     } else {
-        // bq 模式：按桶加载量化数据，使用 fastscan + 正确的估计公式；若 bits>1 再进行 ex_bits boosting
+        // BQ 模式：若桶内向量数 >= 阈值，优先使用图搜（需要该桶已构图）；否则使用 fastscan
         for (uint32_t bucket_id : nearest_bucket_ids) {
+            const size_t bucket_size = buckets[bucket_id].size();
+            if (bucket_size >= bq_graph_threshold) {
+                // 优先使用 BQ 图搜索；若 bqgraph 缺失则回退 fastscan
+                std::vector<std::pair<float, uint32_t>> local_cand;
+                bq_graph_search(bucket_id, query, dim, k, local_cand);
+                if (!local_cand.empty()) {
+                    for (auto& p : local_cand) {
+                        uint32_t local_idx = p.second;
+                        if (local_idx < buckets[bucket_id].size()) {
+                            uint32_t global_id = buckets[bucket_id][local_idx];
+                            if (visited_ids.insert(global_id).second) {
+                                candidates.emplace_back(p.first, global_id);
+                            }
+                        }
+                    }
+                    continue; // 已用 bqgraph
+                }
+                // 若未加载到 bqgraph，回退 fastscan
+            }
+
+            // fastscan 路径（小桶或 bqgraph 缺失）
             BQBucketData bd;
             if (!load_bq_bucket(bucket_id, bd) || bd.num_points == 0) continue;
             size_t code_cols = bd.padded_dim / 8;
@@ -297,13 +456,13 @@ QueryResult search_two_stage(
 
                     // ex_bits boosting（如果存在 ex_data）
                     if (bd.bits > 1 && !bd.ex_blob.empty()) {
-                        size_t ex_bits = bd.bits - 1;
-                        size_t ex_stride = rabitqlib::ExDataMap<float>::data_bytes(bd.padded_dim, ex_bits);
+                        size_t ex_bits2 = bd.bits - 1;
+                        size_t ex_stride = rabitqlib::ExDataMap<float>::data_bytes(bd.padded_dim, ex_bits2);
                         const char* ex_ptr = reinterpret_cast<const char*>(bd.ex_blob.data()) + (idx * ex_stride);
-                        auto ip_func = rabitqlib::select_excode_ipfunc(ex_bits);
-                        rabitqlib::ConstExDataMap<float> ex_map(ex_ptr, bd.padded_dim, ex_bits);
+                        auto ip_func = rabitqlib::select_excode_ipfunc(ex_bits2);
+                        rabitqlib::ConstExDataMap<float> ex_map(ex_ptr, bd.padded_dim, ex_bits2);
                         float ex_dist = ex_map.f_add_ex() + qobj.g_add() + (ex_map.f_rescale_ex() *
-                            (static_cast<float>(1 << ex_bits) * (ip_est) + ip_func(q_pad.data(), ex_map.ex_code(), bd.padded_dim) + qobj.kbxsumq()));
+                            (static_cast<float>(1 << ex_bits2) * (ip_est) + ip_func(q_pad.data(), ex_map.ex_code(), bd.padded_dim) + qobj.kbxsumq()));
                         dist_est = ex_dist;
                     }
 
@@ -327,6 +486,7 @@ QueryResult search_two_stage(
             }
         }
     }
+    
     
     std::sort(candidates.begin(), candidates.end());
 

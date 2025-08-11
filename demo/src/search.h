@@ -66,7 +66,8 @@ QueryResult search_two_stage(
     size_t top_k,
     IndexCache& index_cache,
     size_t dim,
-    bool use_bq // 新增：是否使用bq量化向量查询
+    bool use_bq, // 新增：是否使用bq量化向量查询
+    size_t bq_graph_threshold // 新增：大桶阈值，>=阈值时图搜
 );
 
 // Calculate recall

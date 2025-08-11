@@ -8,6 +8,7 @@
 #include <atomic>
 #include <algorithm>
 #include <iomanip>  // 添加这个头文件用于std::fixed和std::setprecision
+#include <cmath>
 
 #include "utils.h"
 #include "kmeans.h"
@@ -18,6 +19,7 @@
 #include "/home/danbai.wq/DiskANN/rabitq/rabitqlib/quantization/rabitq.hpp"
 #include "/home/danbai.wq/DiskANN/rabitq/rabitqlib/quantization/data_layout.hpp"
 #include "/home/danbai.wq/DiskANN/rabitq/rabitqlib/fastscan/fastscan.hpp"
+#include "/home/danbai.wq/DiskANN/rabitq/rabitqlib/index/query.hpp"
 
 void build_mode(const std::string& data_path) {
     std::cout << "\n--- Running in BUILD mode ---" << std::endl;
@@ -40,7 +42,6 @@ void build_mode(const std::string& data_path) {
     if (const char* envb = std::getenv("BQ_BITS")) {
         bq_bits = std::max<size_t>(1, std::min<size_t>(8, std::stoul(envb)));
     }
-
     
     // 获取可用线程数，但为每个索引构建留一些余量
     const size_t max_threads = std::thread::hardware_concurrency();
@@ -192,38 +193,35 @@ void build_mode(const std::string& data_path) {
             // 原始构图
             build_and_save_vamana_graph(bucket_data, {}, bucket_graph_path, graph_degree, build_complexity, threads_per_bucket);
         } else {
-            // bq: 量化并保存量化文件，且不再构建子图
-            size_t padded_dim = (dim + 3) / 4 * 4;
-            DataSet bucket_padded = bucket_data;
-            if (padded_dim != dim) {
-                for (auto& v : bucket_padded) v.resize(padded_dim, 0.0f);
+            // 读取 BQ_GRAPH_THRESHOLD 环境变量，默认 1000
+            size_t bq_graph_threshold = 1000;
+            if (const char* env_thr = std::getenv("BQ_GRAPH_THRESHOLD")) {
+                try { bq_graph_threshold = std::stoul(env_thr); } catch (...) {}
             }
-            const size_t num = bucket_padded.size();
-            // 输出文件：bucket_i_bq.bin
-            std::string bq_path = "bucket_" + std::to_string(i) + "_bq.bin";
-            std::ofstream out(bq_path, std::ios::binary);
-            if (!out.is_open()) {
-                #pragma omp critical
-                std::cerr << "Failed to open " << bq_path << " for write" << std::endl;
-            } else {
-                uint64_t pd = padded_dim, bits = bq_bits, n = num;
-                out.write(reinterpret_cast<char*>(&pd), sizeof(uint64_t));
-                out.write(reinterpret_cast<char*>(&bits), sizeof(uint64_t));
-                out.write(reinterpret_cast<char*>(&n), sizeof(uint64_t));
-                using namespace rabitqlib::quant;
-                RabitqConfig cfg = faster_config(padded_dim, bq_bits);
-                // 1-bit打包与因子
-                std::vector<uint8_t> packed_codes((( (num + 31) & ~31ULL) / 32) * (padded_dim / 8) * 32);
+
+            if (buckets[i].size() >= bq_graph_threshold) {
+                // --- 使用 BQ 距离构建大桶图：生成batched 1bit codes + 可选ex_data，并据此做近邻选择 ---
+                size_t padded_dim = (dim + 3) / 4 * 4;
+                DataSet bucket_padded = bucket_data;
+                if (padded_dim != dim) {
+                    for (auto& v : bucket_padded) v.resize(padded_dim, 0.0f);
+                }
+                const size_t num = bucket_padded.size();
+
+                // 生成batched 1-bit codes与因子（供fastscan批量距离估计）
+                std::vector<uint8_t> packed_codes((((num + 31) & ~31ULL) / 32) * (padded_dim / 8) * 32);
                 std::vector<float> f_add(num), f_rescale(num), f_err(num);
 
-                // 将桶内数据展平为连续内存，并补零到 padded_dim
                 std::vector<float> flat_data(num * padded_dim, 0.0f);
                 for (size_t r = 0; r < num; ++r) {
                     std::copy(bucket_padded[r].begin(), bucket_padded[r].end(), flat_data.begin() + r * padded_dim);
                 }
-                // 生成 padded 的 centroid
                 std::vector<float> centroid_pad(padded_dim, 0.0f);
                 std::copy(final_centroids[i].begin(), final_centroids[i].end(), centroid_pad.begin());
+
+                using namespace rabitqlib;
+                using namespace rabitqlib::quant;
+                RabitqConfig cfg = faster_config(padded_dim, bq_bits);
 
                 rabitqlib::quant::rabitq_impl::one_bit::one_bit_batch_code<float, false>(
                     flat_data.data(),
@@ -236,15 +234,13 @@ void build_mode(const std::string& data_path) {
                     f_err.data(),
                     rabitqlib::METRIC_L2
                 );
-                out.write(reinterpret_cast<const char*>(packed_codes.data()), packed_codes.size());
-                out.write(reinterpret_cast<const char*>(f_add.data()), sizeof(float) * num);
-                out.write(reinterpret_cast<const char*>(f_rescale.data()), sizeof(float) * num);
 
-                // 多bit时写出 ex_data（按 ExDataMap 布局）
+                // ex_data（可选）
+                std::vector<uint8_t> ex_blob;
                 if (bq_bits > 1) {
                     size_t ex_bits = bq_bits - 1;
                     size_t ex_stride = rabitqlib::ExDataMap<float>::data_bytes(padded_dim, ex_bits);
-                    std::vector<uint8_t> ex_blob(ex_stride * num);
+                    ex_blob.resize(ex_stride * num);
                     char* ex_ptr = reinterpret_cast<char*>(ex_blob.data());
                     for (size_t r = 0; r < num; ++r) {
                         rabitqlib::quant::quantize_compact_ex_bits<float>(
@@ -258,9 +254,147 @@ void build_mode(const std::string& data_path) {
                         );
                         ex_ptr += ex_stride;
                     }
-                    out.write(reinterpret_cast<const char*>(ex_blob.data()), ex_blob.size());
                 }
-                out.close();
+
+                // 基于 BQ 距离选择每个点的 graph_degree 个邻居（O(n^2) 构建）
+                std::vector<uint32_t> adj(num * graph_degree, 0);
+
+                #pragma omp parallel for schedule(static)
+                for (size_t u = 0; u < num; ++u) {
+                    // 构造查询对象（按之前fastscan路径保持一致的因子设置）
+                    std::vector<float> q_pad(padded_dim, 0.0f);
+                    std::copy(bucket_padded[u].begin(), bucket_padded[u].end(), q_pad.begin());
+                    rabitqlib::SplitBatchQuery<float> qobj(q_pad.data(), padded_dim, (bq_bits > 1 ? bq_bits - 1 : 0), rabitqlib::METRIC_L2, false);
+                    float qnorm2 = 0.0f; for (size_t ddd = 0; ddd < padded_dim; ++ddd) qnorm2 += q_pad[ddd] * q_pad[ddd];
+                    float qnorm = std::sqrt(qnorm2);
+                    qobj.set_g_add(qnorm, 0.0f);
+
+                    std::vector<std::pair<float, uint32_t>> local_dists;
+                    local_dists.reserve(num);
+
+                    size_t code_cols = padded_dim / 8;
+                    size_t num_rd = (num + 31) & ~31ULL;
+                    size_t batches = num_rd / 32;
+                    std::array<uint16_t, rabitqlib::fastscan::kBatchSize> accu{};
+
+                    for (size_t b = 0; b < batches; ++b) {
+                        const uint8_t* codes = packed_codes.data() + b * (code_cols * 32);
+                        rabitqlib::fastscan::accumulate(codes, qobj.lut(), accu.data(), padded_dim);
+                        size_t base = b * 32;
+                        size_t batch = std::min<size_t>(32, num - base);
+                        for (size_t ii = 0; ii < batch; ++ii) {
+                            size_t v = base + ii;
+                            if (v == u) continue;
+                            float ip_est = qobj.delta() * static_cast<float>(accu[ii]) + qobj.sum_vl_lut();
+                            float dist_est = f_add[v] + qobj.g_add() + f_rescale[v] * (ip_est + qobj.k1xsumq());
+                            if (bq_bits > 1 && !ex_blob.empty()) {
+                                size_t ex_bits = bq_bits - 1;
+                                size_t ex_stride = rabitqlib::ExDataMap<float>::data_bytes(padded_dim, ex_bits);
+                                const char* ex_ptr = reinterpret_cast<const char*>(ex_blob.data()) + (v * ex_stride);
+                                auto ip_func = rabitqlib::select_excode_ipfunc(ex_bits);
+                                rabitqlib::ConstExDataMap<float> ex_map(ex_ptr, padded_dim, ex_bits);
+                                float ex_dist = ex_map.f_add_ex() + qobj.g_add() + (ex_map.f_rescale_ex() *
+                                    (static_cast<float>(1 << ex_bits) * (ip_est) + ip_func(q_pad.data(), ex_map.ex_code(), padded_dim) + qobj.kbxsumq()));
+                                dist_est = ex_dist;
+                            }
+                            local_dists.emplace_back(dist_est, static_cast<uint32_t>(v));
+                        }
+                    }
+
+                    size_t want = std::min(graph_degree, local_dists.size());
+                    std::nth_element(local_dists.begin(), local_dists.begin() + want, local_dists.end());
+                    for (size_t ttt = 0; ttt < want; ++ttt) {
+                        adj[u * graph_degree + ttt] = local_dists[ttt].second;
+                    }
+                    for (size_t ttt = want; ttt < graph_degree; ++ttt) {
+                        adj[u * graph_degree + ttt] = local_dists.empty() ? 0u : local_dists[0].second;
+                    }
+                }
+
+                // 写出 bqgraph 文件：header(pd,bits,num,degree) + batched codes + f_add + f_rescale + ex_blob + 邻接表
+                std::string gpath = "bucket_" + std::to_string(i) + "_bqgraph.bin";
+                std::ofstream gout(gpath, std::ios::binary);
+                if (!gout.is_open()) {
+                    #pragma omp critical
+                    std::cerr << "Failed to open " << gpath << " for write" << std::endl;
+                } else {
+                    uint64_t pd = padded_dim, bits = bq_bits, n = num, deg = graph_degree;
+                    gout.write(reinterpret_cast<char*>(&pd), sizeof(uint64_t));
+                    gout.write(reinterpret_cast<char*>(&bits), sizeof(uint64_t));
+                    gout.write(reinterpret_cast<char*>(&n), sizeof(uint64_t));
+                    gout.write(reinterpret_cast<char*>(&deg), sizeof(uint64_t));
+                    gout.write(reinterpret_cast<const char*>(packed_codes.data()), packed_codes.size());
+                    gout.write(reinterpret_cast<const char*>(f_add.data()), sizeof(float) * num);
+                    gout.write(reinterpret_cast<const char*>(f_rescale.data()), sizeof(float) * num);
+                    if (!ex_blob.empty()) {
+                        gout.write(reinterpret_cast<const char*>(ex_blob.data()), ex_blob.size());
+                    }
+                    gout.write(reinterpret_cast<const char*>(adj.data()), sizeof(uint32_t) * adj.size());
+                    gout.close();
+                }
+            } else {
+                // 小桶：仅生成 bq.bin，不构建图
+                size_t padded_dim = (dim + 3) / 4 * 4;
+                DataSet bucket_padded = bucket_data;
+                if (padded_dim != dim) {
+                    for (auto& v : bucket_padded) v.resize(padded_dim, 0.0f);
+                }
+                const size_t num = bucket_padded.size();
+                std::string bq_path = "bucket_" + std::to_string(i) + "_bq.bin";
+                std::ofstream out(bq_path, std::ios::binary);
+                if (!out.is_open()) {
+                    #pragma omp critical
+                    std::cerr << "Failed to open " << bq_path << " for write" << std::endl;
+                } else {
+                    uint64_t pd = padded_dim, bits = bq_bits, n = num;
+                    out.write(reinterpret_cast<char*>(&pd), sizeof(uint64_t));
+                    out.write(reinterpret_cast<char*>(&bits), sizeof(uint64_t));
+                    out.write(reinterpret_cast<char*>(&n), sizeof(uint64_t));
+                    using namespace rabitqlib::quant;
+                    RabitqConfig cfg = faster_config(padded_dim, bq_bits);
+                    std::vector<uint8_t> packed_codes((((num + 31) & ~31ULL) / 32) * (padded_dim / 8) * 32);
+                    std::vector<float> f_add(num), f_rescale(num), f_err(num);
+                    std::vector<float> flat_data(num * padded_dim, 0.0f);
+                    for (size_t r = 0; r < num; ++r) {
+                        std::copy(bucket_padded[r].begin(), bucket_padded[r].end(), flat_data.begin() + r * padded_dim);
+                    }
+                    std::vector<float> centroid_pad(padded_dim, 0.0f);
+                    std::copy(final_centroids[i].begin(), final_centroids[i].end(), centroid_pad.begin());
+                    rabitqlib::quant::rabitq_impl::one_bit::one_bit_batch_code<float, false>(
+                        flat_data.data(),
+                        centroid_pad.data(),
+                        num,
+                        padded_dim,
+                        packed_codes.data(),
+                        f_add.data(),
+                        f_rescale.data(),
+                        f_err.data(),
+                        rabitqlib::METRIC_L2
+                    );
+                    out.write(reinterpret_cast<const char*>(packed_codes.data()), packed_codes.size());
+                    out.write(reinterpret_cast<const char*>(f_add.data()), sizeof(float) * num);
+                    out.write(reinterpret_cast<const char*>(f_rescale.data()), sizeof(float) * num);
+                    if (bq_bits > 1) {
+                        size_t ex_bits = bq_bits - 1;
+                        size_t ex_stride = rabitqlib::ExDataMap<float>::data_bytes(padded_dim, ex_bits);
+                        std::vector<uint8_t> ex_blob(ex_stride * num);
+                        char* ex_ptr = reinterpret_cast<char*>(ex_blob.data());
+                        for (size_t r = 0; r < num; ++r) {
+                            rabitqlib::quant::quantize_compact_ex_bits<float>(
+                                flat_data.data() + r * padded_dim,
+                                centroid_pad.data(),
+                                padded_dim,
+                                ex_bits,
+                                ex_ptr,
+                                rabitqlib::METRIC_L2,
+                                cfg
+                            );
+                            ex_ptr += ex_stride;
+                        }
+                        out.write(reinterpret_cast<const char*>(ex_blob.data()), ex_blob.size());
+                    }
+                    out.close();
+                }
             }
         }
         
@@ -325,6 +459,11 @@ void search_mode(const std::string& query_path, const std::string& gt_path) {
     std::cout << "Read metadata: average_buckets_per_vector=" << average_buckets_per_vector << std::endl;
     std::cout << "Read metadata: use_bq=" << use_bq_flag << ", bits=" << bq_bits << std::endl;
 
+    // 读取 BQ_GRAPH_THRESHOLD 环境变量，默认 1000
+    size_t bq_graph_threshold = 1000;
+    if (const char* env_thr = std::getenv("BQ_GRAPH_THRESHOLD")) {
+        try { bq_graph_threshold = std::stoul(env_thr); } catch (...) {}
+    }
 
     // --- Load Search Data ---
     std::cout << "Loading query and ground truth data..." << std::endl;
@@ -380,7 +519,7 @@ void search_mode(const std::string& query_path, const std::string& gt_path) {
         #pragma omp parallel for
         for (size_t i = 0; i < num_queries; ++i) {
             DataPoint query = get_point_copy(queries_flat, i, dim);
-            results[i] = search_two_stage(query, *medoid_index, buckets, f_val, k, top_k, bucket_index_cache, dim, use_bq_flag == 1);
+            results[i] = search_two_stage(query, *medoid_index, buckets, f_val, k, top_k, bucket_index_cache, dim, use_bq_flag == 1, bq_graph_threshold);
         }
         auto end_time = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> diff = end_time - start_time;
@@ -389,7 +528,6 @@ void search_mode(const std::string& query_path, const std::string& gt_path) {
         // Flatten results for recall calculation
         std::vector<uint32_t> our_results_flat(num_queries * top_k, 0);
         for(size_t i = 0; i < num_queries; ++i) {
-            // Ensure we don't copy more than top_k or more than available results
             size_t num_to_copy = std::min(top_k, results[i].ids.size());
             if (num_to_copy > 0) {
                  std::copy(results[i].ids.begin(), results[i].ids.begin() + num_to_copy, our_results_flat.data() + i * top_k);
