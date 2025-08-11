@@ -244,8 +244,8 @@ void search_mode(const std::string& query_path, const std::string& gt_path) {
     std::cout << "\n--- Running in SEARCH mode ---" << std::endl;
 
     // --- Parameters ---
-    const int f = 2; // Number of buckets to search
-    const int k = 50; // Number of neighbors to retrieve per bucket
+    const int f = 4; // Number of buckets to search
+    const int k = 100; // Number of neighbors to retrieve per bucket
     const int num_threads = std::thread::hardware_concurrency();
 
     // --- Load metadata ---
@@ -254,7 +254,7 @@ void search_mode(const std::string& query_path, const std::string& gt_path) {
     float beta = 0.0f; // 新增：加载beta参数
     double average_buckets_per_vector = 0.0; // 新增：加载平均分桶数
     int use_bq_flag = 0; // 新增：是否使用bq
-    size_t bq_bits = 4;  // 新增：bq bits
+    size_t bq_bits = 12;  // 新增：bq bits
     std::ifstream meta_reader("medoid_meta.txt");
     if (!meta_reader.is_open()) {
         std::cerr << "FATAL: medoid_meta.txt not found. Please run build mode first." << std::endl;

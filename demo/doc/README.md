@@ -18,7 +18,7 @@
 
 1. **并行聚类**: 运行 `t=10` 次并行 Mini-batch K-means，每次从数据集随机采样训练
 2. **质心融合**: 将 `t` 次聚类结果平均，得到 `m=256` 个高质量聚类中心
-3. **🚀 智能距离约束分桶**: 采用创新的距离比例约束策略，而非固定分配到最近的 `l=5` 个桶：
+3. **智能距离约束分桶**: 采用创新的距离比例约束策略，而非固定分配到最近的 `l=5` 个桶：
    - 计算向量到所有聚类中心的距离并排序
    - 以最近距离 `dist1` 为基准
    - 后续桶需满足约束条件：`β × dist1 ≥ dist_k` 才能分配
@@ -414,10 +414,10 @@ Thread 2 completed bucket 73 (58/138 finished)
 ```
 
 这表明：
-- ✅ **真正并行**: 4个线程同时工作，无串行等待
-- ✅ **乱序执行**: bucket序号完全随机，证明并行生效
-- ✅ **负载均衡**: 各线程工作量基本均匀分布
-- ✅ **实时同步**: 全局进度实时更新
+- **真正并行**: 4个线程同时工作，无串行等待
+- **乱序执行**: bucket序号完全随机，证明并行生效
+- **负载均衡**: 各线程工作量基本均匀分布
+- **实时同步**: 全局进度实时更新
 
 **性能优化效果**：
 
@@ -712,70 +712,88 @@ ls demo/demo_test
 
 ## 7. BQ 量化优化（RaBitQ 集成）
 
-为改善高维场景下的 QPS 与内存占用，新增可选的 BQ 量化（RaBitQ）优化路径，用量化后的向量替代原始向量进行桶内检索。
+为降低桶内检索的内存与计算成本，支持在构建阶段对桶内向量做 BQ 压缩，并在查询阶段对“大桶”采用基于压缩向量的图搜索（bqgraph），对“小桶”采用 fastscan 暴搜。
 
 ### 7.1 总览
-- 模式开关：通过环境变量启用
+- 模式开关：通过环境变量控制
   - `USE_BQ=1` 开启量化模式；`USE_BQ=0` 使用原始向量（默认）
-  - `BQ_BITS=1..8` 设置总量化比特数。实现采用“1bit 基码 + (BQ_BITS-1) ex_bits”策略
-- 元数据扩展：`medoid_meta.txt` 增加 `use_bq` 与 `bits` 字段
+  - `BQ_BITS=...` 设置总量化比特（当前默认 12）
+- 构建产物（建议统一放在 `build/` 下）：
+  - `buckets.bin`：桶内局部ID→全局ID映射
+  - `medoid_vamana.index`：质心图（第一阶段粗筛）
+  - 小桶（< 阈值）：`bucket_<i>_bq.bin`
+  - 大桶（≥ 阈值）：`bucket_<i>_bqgraph.bin`
 
-### 7.2 构建流程（桶内量化）
-- 保持 KMeans 分桶不变
-- 每个桶：
-  1) 对每个向量与其所属桶的聚类中心做 1bit 量化，并使用 fastscan 的批处理布局打包
-  2) 记录每向量的 `f_add`、`f_rescale`
-  3) 若 `BQ_BITS>1`：额外为每个向量生成 ex_bits（`ex_bits=BQ_BITS-1`）并压缩为 `ExDataMap` 布局
-- 输出文件（每桶一个）：`bucket_<i>_bq.bin`
-  - Header: `uint64 padded_dim, uint64 bits, uint64 num`
-  - Body:
-    - 1bit packed codes（fastscan 批处理布局）
-    - `f_add[num]`、`f_rescale[num]`
-    - 若 `bits>1`：追加 ex_data（按 `ExDataMap` 连续布局排列）
+### 7.2 构建流程（固定窗口C）
+- 分桶不变（KMeans + 距离约束）：按“距质心升序”作为插入顺序
+- 桶大小与产物：
+  - 小桶：直接量化并写出 `bucket_<i>_bq.bin`
+  - 大桶：构建 bqgraph（压缩向量图），写出 `bucket_<i>_bqgraph.bin`
+- bqgraph 文件结构：
+  - Header: `uint64 padded_dim, uint64 bits, uint64 num, uint64 degree`
+  - Body: batched 1bit codes + `f_add[num]` + `f_rescale[num]` + 可选 `ex_blob`（当 `BQ_BITS>1`）+ 邻接表（`num*degree`）
+- 邻接构建（与 Vamana 思路一致，固定窗口 C）：
+  - 候选生成：在“当前已插入子图”的入口点（初始化使用 medoid）上，用固定窗口 C（等于 `build_complexity`）做图上候选收集
+  - 剪枝：对候选按距离升序，采用 α-遮挡（α=1.2）剔除冗余；不足 `degree` 再按近邻补齐
+  - 距离：统一使用 RaBitQ 的 ex-bits 提升后的估计距离（1bit fastscan 粗评 + ex_bits boosting）
+  - 说明：当前实现不包含弱互连与饱和 pass，不包含自适应 C 与入口点动态细化（以降低复杂度与便于稳定对齐）
 
-### 7.3 查询流程（两阶段 + 量化桶内检索）
-- 第一阶段（不变）：在 `medoid_vamana.index` 上搜索得到最相近的 `f` 个桶 ID
-- 第二阶段（变化）：
-  - 原始模式：加载 `bucket_*_vamana.index` 在子图上检索
-  - BQ 模式：按桶读取 `bucket_*_bq.bin`
-    1) 使用 `SplitBatchQuery` 基于查询向量构建 LUT 与必要参数（`delta`, `sum_vl_lut`, `k1xsumq`, `g_add=||q||^2`）
-    2) 用 fastscan 对 1bit packed codes 累积得到 `accu`，一比特估计：
-       - `ip_est = delta * accu + sum_vl_lut`
-       - `dist_est = f_add + g_add + f_rescale * (ip_est + k1xsumq)`
-    3) 若 `bits>1`：使用 ex_bits 提升精度（boosting）：
-       - 取对应向量的 ex_data，选择 `ip_func = select_excode_ipfunc(ex_bits)`
-       - `dist_boosted = f_add_ex + g_add + f_rescale_ex * ( (1<<ex_bits)*ip_est + ip_func(q, ex_code, padded_dim) + kbxsumq )`
-       - 用 `dist_boosted` 替换 `dist_est`
-    4) 按桶选取 `k` 个候选（不足则全取），映射为全局ID后合并、全局排序取 `top_k`
+### 7.3 构建并行优化（两阶段小批）
+为降低构建时间、避免块间并行对候选决策的干扰，采用“两阶段小批”的实现：
+- 批次切分：按插入顺序将桶内向量切成大小 B（默认 1024）的批次
+- Phase A（候选与剪枝，读取多/写入少）：
+  - 在“上一批完成后的稳定图快照”上，逐点做固定 C 的候选搜集与 α-遮挡剪枝
+  - 结果保存在本批的本地缓冲，不改全局邻接
+- Phase B（合并写入）：
+  - 将本批的邻接结果顺序写入全局邻接；批与批之间以栅栏分隔，保证下一批的候选基于稳定快照
+- 优点：在保证接近顺序插入质量的同时，批间可并行，显著降低构建总时间
 
-### 7.4 构建与运行命令
-在仓库根目录统一构建：
+### 7.4 查询流程（两阶段 + bqgraph）
+- 第一阶段：在 `medoid_vamana.index` 上搜索，得到最相近的 `f` 个桶ID
+- 第二阶段：
+  - 大桶：若存在 `bucket_<i>_bqgraph.bin`，则在 bqgraph 上做 efSearch（HNSW 风格）
+    - 入口种子：综合“高入度 hub”与“按 stride 采样并评估距离的 seeds”合并去重
+    - efSearch：维护候选小顶堆与最佳大顶堆（可通过 `BQ_EF_SEARCH` 控制宽度），以 ex-bits 距离扩展邻居、早停判断
+    - 轻量增广：对桶内按 stride 采样最多 1024 个点，做一次快速评估加入候选后再截断至 top-k（提升召回、代价可控）
+  - 小桶：读取 `bucket_<i>_bq.bin`，用 fastscan 批量估计并可选 ex-bits 提升，选取 top-k
+  - ID 映射：将桶内局部ID映射为全局ID；所有桶候选合并去重后按真实距离排序，返回 top_k
+
+### 7.5 构建与运行命令
+- 统一编译：
 ```bash
 cd /home/danbai.wq/DiskANN
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j $(nproc)
 ```
-原始 RAW 模式：
+- 构建（示例）：
 ```bash
 cd build
-./demo/demo_test /path/to/base.fbin
-./demo/demo_test /path/to/query.fbin /path/to/ground_truth.ivecs
+# BQ 模式、默认 bits=12
+USE_BQ=1 BQ_BITS=12 ./demo/demo_test /path/to/base.fbin
 ```
-BQ 模式（示例 4bit）：
+- 查询（示例）：
 ```bash
 cd build
-USE_BQ=1 BQ_BITS=4 ./demo/demo_test /path/to/base.fbin
-./demo/demo_test /path/to/query.fbin /path/to/ground_truth.ivecs
+# efSearch 与入口 seeds（默认 ef=128, seeds=8，可按需微调）
+BQ_EF_SEARCH=128 BQ_SEEDS=8 ./demo/demo_test /path/to/query.fbin /path/to/ground_truth.ivecs
 ```
 
-### 7.5 参数建议
-- `BQ_BITS`：推荐 4bit，在 SIFT 等数据集上可显著提升召回
-- `f`：增大可提升召回（如 5/10/16），但增加耗时
-- `k`：每桶候选数，适度增大会提升 recall@top_k
-- `beta`：分桶严格度，过大可能降低召回，建议 1.0~1.05/1.1 之间调参
+### 7.6 参数说明（集中于 main.cpp）
+- 构建端：
+  - `USE_BQ`：是否启用 BQ 模式
+  - `BQ_BITS`：量化比特（当前默认 12）
+  - `BQ_GRAPH_THRESHOLD`：大桶阈值（≥ 阈值构 bqgraph，否则写 bq.bin）
+  - 固定图参数（在 `main.cpp`）：`graph_degree=32`、`build_complexity=50`、`alpha=1.2`
+- 查询端：
+  - `BQ_EF_SEARCH`：bqgraph 搜索的 ef 宽度（默认 128）
+  - `BQ_SEEDS`：入口种子数量（默认 8）。搜索种子综合 hub 与采样 seeds
 
-### 7.6 注意事项
-- 维度对齐：fastscan LUT 按 4 维分组，`padded_dim = ceil(dim/4)*4`
-- 文件路径：所有输出（`medoid_vamana.index`, `buckets.bin`, `bucket_*_vamana.index`, `bucket_*_bq.bin`, `medoid_meta.txt`）建议放在 `build/` 下
-- 内存与并发：构建时每桶文件独立写入，避免跨线程共享缓冲；查询时按需加载 bq 文件并在内存中计算
-- 模式共存：同一目录可同时存在 RAW 与 BQ 文件，互不覆盖、互不依赖 
+### 7.7 其它可选的构建优化（未启用，后续可考虑）
+- K 步交错插入（K-step interleaving）：将插入顺序按步长 K 交错分段，分段内串行或小并发，段与段之间并行，降低强相关点同批插入概率
+- 子域分片 + 边界修复：按空间/质心距离将桶切分多个子域，域内并行构图，最后做跨域边界的连接修复（以固定 C 做跨域候选），扩展性更强
+- 双缓冲入口点集合：维护“稳定入口集 + 最新入口集”，候选搜索固定用稳定集，每批完成后用本批代表点更新稳定集，提升可达性
+
+### 7.8 注意事项
+- 维度对齐：fastscan LUT 按 32 批处理，`padded_dim = ceil(dim/4)*4`
+- 文件路径：运行时默认在当前工作目录读写（建议进入 `build/` 目录执行）
+- 兼容性：当前实现不包含弱互连、饱和 pass、自适应 C 与入口点策略细化，便于与 DiskANN 默认 Vamana 流程对齐并保持构建代价可控 
