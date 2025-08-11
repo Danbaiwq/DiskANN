@@ -14,6 +14,7 @@
 #include "kmeans.h"
 #include "vamana_graph.h"
 #include "search.h"
+#include "build.h"
 
 // rabitq 量化接口（构建阶段用）
 #include "/home/danbai.wq/DiskANN/rabitq/rabitqlib/quantization/rabitq.hpp"
@@ -29,7 +30,7 @@ void build_mode(const std::string& data_path) {
     const size_t m = 1024;
     const int t = 8;
     const int l = 3;
-    const float beta = 1.2f;  // 新增：距离比例约束参数
+    const float beta = 1.02f;  // 新增：距离比例约束参数
     const size_t graph_degree = 32;
     const size_t build_complexity = 50;
 
@@ -198,203 +199,14 @@ void build_mode(const std::string& data_path) {
             if (const char* env_thr = std::getenv("BQ_GRAPH_THRESHOLD")) {
                 try { bq_graph_threshold = std::stoul(env_thr); } catch (...) {}
             }
-
+            size_t padded_dim = (dim + 3) / 4 * 4;
             if (buckets[i].size() >= bq_graph_threshold) {
-                // --- 使用 BQ 距离构建大桶图：生成batched 1bit codes + 可选ex_data，并据此做近邻选择 ---
-                size_t padded_dim = (dim + 3) / 4 * 4;
-                DataSet bucket_padded = bucket_data;
-                if (padded_dim != dim) {
-                    for (auto& v : bucket_padded) v.resize(padded_dim, 0.0f);
-                }
-                const size_t num = bucket_padded.size();
-
-                // 生成batched 1-bit codes与因子（供fastscan批量距离估计）
-                std::vector<uint8_t> packed_codes((((num + 31) & ~31ULL) / 32) * (padded_dim / 8) * 32);
-                std::vector<float> f_add(num), f_rescale(num), f_err(num);
-
-                std::vector<float> flat_data(num * padded_dim, 0.0f);
-                for (size_t r = 0; r < num; ++r) {
-                    std::copy(bucket_padded[r].begin(), bucket_padded[r].end(), flat_data.begin() + r * padded_dim);
-                }
-                std::vector<float> centroid_pad(padded_dim, 0.0f);
-                std::copy(final_centroids[i].begin(), final_centroids[i].end(), centroid_pad.begin());
-
-                using namespace rabitqlib;
-                using namespace rabitqlib::quant;
-                RabitqConfig cfg = faster_config(padded_dim, bq_bits);
-
-                rabitqlib::quant::rabitq_impl::one_bit::one_bit_batch_code<float, false>(
-                    flat_data.data(),
-                    centroid_pad.data(),
-                    num,
-                    padded_dim,
-                    packed_codes.data(),
-                    f_add.data(),
-                    f_rescale.data(),
-                    f_err.data(),
-                    rabitqlib::METRIC_L2
-                );
-
-                // ex_data（可选）
-                std::vector<uint8_t> ex_blob;
-                if (bq_bits > 1) {
-                    size_t ex_bits = bq_bits - 1;
-                    size_t ex_stride = rabitqlib::ExDataMap<float>::data_bytes(padded_dim, ex_bits);
-                    ex_blob.resize(ex_stride * num);
-                    char* ex_ptr = reinterpret_cast<char*>(ex_blob.data());
-                    for (size_t r = 0; r < num; ++r) {
-                        rabitqlib::quant::quantize_compact_ex_bits<float>(
-                            flat_data.data() + r * padded_dim,
-                            centroid_pad.data(),
-                            padded_dim,
-                            ex_bits,
-                            ex_ptr,
-                            rabitqlib::METRIC_L2,
-                            cfg
-                        );
-                        ex_ptr += ex_stride;
-                    }
-                }
-
-                // 基于 BQ 距离选择每个点的 graph_degree 个邻居（O(n^2) 构建）
-                std::vector<uint32_t> adj(num * graph_degree, 0);
-
-                #pragma omp parallel for schedule(static)
-                for (size_t u = 0; u < num; ++u) {
-                    // 构造查询对象（按之前fastscan路径保持一致的因子设置）
-                    std::vector<float> q_pad(padded_dim, 0.0f);
-                    std::copy(bucket_padded[u].begin(), bucket_padded[u].end(), q_pad.begin());
-                    rabitqlib::SplitBatchQuery<float> qobj(q_pad.data(), padded_dim, (bq_bits > 1 ? bq_bits - 1 : 0), rabitqlib::METRIC_L2, false);
-                    float qnorm2 = 0.0f; for (size_t ddd = 0; ddd < padded_dim; ++ddd) qnorm2 += q_pad[ddd] * q_pad[ddd];
-                    float qnorm = std::sqrt(qnorm2);
-                    qobj.set_g_add(qnorm, 0.0f);
-
-                    std::vector<std::pair<float, uint32_t>> local_dists;
-                    local_dists.reserve(num);
-
-                    size_t code_cols = padded_dim / 8;
-                    size_t num_rd = (num + 31) & ~31ULL;
-                    size_t batches = num_rd / 32;
-                    std::array<uint16_t, rabitqlib::fastscan::kBatchSize> accu{};
-
-                    for (size_t b = 0; b < batches; ++b) {
-                        const uint8_t* codes = packed_codes.data() + b * (code_cols * 32);
-                        rabitqlib::fastscan::accumulate(codes, qobj.lut(), accu.data(), padded_dim);
-                        size_t base = b * 32;
-                        size_t batch = std::min<size_t>(32, num - base);
-                        for (size_t ii = 0; ii < batch; ++ii) {
-                            size_t v = base + ii;
-                            if (v == u) continue;
-                            float ip_est = qobj.delta() * static_cast<float>(accu[ii]) + qobj.sum_vl_lut();
-                            float dist_est = f_add[v] + qobj.g_add() + f_rescale[v] * (ip_est + qobj.k1xsumq());
-                            if (bq_bits > 1 && !ex_blob.empty()) {
-                                size_t ex_bits = bq_bits - 1;
-                                size_t ex_stride = rabitqlib::ExDataMap<float>::data_bytes(padded_dim, ex_bits);
-                                const char* ex_ptr = reinterpret_cast<const char*>(ex_blob.data()) + (v * ex_stride);
-                                auto ip_func = rabitqlib::select_excode_ipfunc(ex_bits);
-                                rabitqlib::ConstExDataMap<float> ex_map(ex_ptr, padded_dim, ex_bits);
-                                float ex_dist = ex_map.f_add_ex() + qobj.g_add() + (ex_map.f_rescale_ex() *
-                                    (static_cast<float>(1 << ex_bits) * (ip_est) + ip_func(q_pad.data(), ex_map.ex_code(), padded_dim) + qobj.kbxsumq()));
-                                dist_est = ex_dist;
-                            }
-                            local_dists.emplace_back(dist_est, static_cast<uint32_t>(v));
-                        }
-                    }
-
-                    size_t want = std::min(graph_degree, local_dists.size());
-                    std::nth_element(local_dists.begin(), local_dists.begin() + want, local_dists.end());
-                    for (size_t ttt = 0; ttt < want; ++ttt) {
-                        adj[u * graph_degree + ttt] = local_dists[ttt].second;
-                    }
-                    for (size_t ttt = want; ttt < graph_degree; ++ttt) {
-                        adj[u * graph_degree + ttt] = local_dists.empty() ? 0u : local_dists[0].second;
-                    }
-                }
-
-                // 写出 bqgraph 文件：header(pd,bits,num,degree) + batched codes + f_add + f_rescale + ex_blob + 邻接表
                 std::string gpath = "bucket_" + std::to_string(i) + "_bqgraph.bin";
-                std::ofstream gout(gpath, std::ios::binary);
-                if (!gout.is_open()) {
-                    #pragma omp critical
-                    std::cerr << "Failed to open " << gpath << " for write" << std::endl;
-                } else {
-                    uint64_t pd = padded_dim, bits = bq_bits, n = num, deg = graph_degree;
-                    gout.write(reinterpret_cast<char*>(&pd), sizeof(uint64_t));
-                    gout.write(reinterpret_cast<char*>(&bits), sizeof(uint64_t));
-                    gout.write(reinterpret_cast<char*>(&n), sizeof(uint64_t));
-                    gout.write(reinterpret_cast<char*>(&deg), sizeof(uint64_t));
-                    gout.write(reinterpret_cast<const char*>(packed_codes.data()), packed_codes.size());
-                    gout.write(reinterpret_cast<const char*>(f_add.data()), sizeof(float) * num);
-                    gout.write(reinterpret_cast<const char*>(f_rescale.data()), sizeof(float) * num);
-                    if (!ex_blob.empty()) {
-                        gout.write(reinterpret_cast<const char*>(ex_blob.data()), ex_blob.size());
-                    }
-                    gout.write(reinterpret_cast<const char*>(adj.data()), sizeof(uint32_t) * adj.size());
-                    gout.close();
-                }
+                BQBuildConfig cfg{ padded_dim, bq_bits, graph_degree, build_complexity, 1.2f };
+                build_large_bucket_bqgraph(i, bucket_data, final_centroids[i], cfg, gpath);
             } else {
-                // 小桶：仅生成 bq.bin，不构建图
-                size_t padded_dim = (dim + 3) / 4 * 4;
-                DataSet bucket_padded = bucket_data;
-                if (padded_dim != dim) {
-                    for (auto& v : bucket_padded) v.resize(padded_dim, 0.0f);
-                }
-                const size_t num = bucket_padded.size();
                 std::string bq_path = "bucket_" + std::to_string(i) + "_bq.bin";
-                std::ofstream out(bq_path, std::ios::binary);
-                if (!out.is_open()) {
-                    #pragma omp critical
-                    std::cerr << "Failed to open " << bq_path << " for write" << std::endl;
-                } else {
-                    uint64_t pd = padded_dim, bits = bq_bits, n = num;
-                    out.write(reinterpret_cast<char*>(&pd), sizeof(uint64_t));
-                    out.write(reinterpret_cast<char*>(&bits), sizeof(uint64_t));
-                    out.write(reinterpret_cast<char*>(&n), sizeof(uint64_t));
-                    using namespace rabitqlib::quant;
-                    RabitqConfig cfg = faster_config(padded_dim, bq_bits);
-                    std::vector<uint8_t> packed_codes((((num + 31) & ~31ULL) / 32) * (padded_dim / 8) * 32);
-                    std::vector<float> f_add(num), f_rescale(num), f_err(num);
-                    std::vector<float> flat_data(num * padded_dim, 0.0f);
-                    for (size_t r = 0; r < num; ++r) {
-                        std::copy(bucket_padded[r].begin(), bucket_padded[r].end(), flat_data.begin() + r * padded_dim);
-                    }
-                    std::vector<float> centroid_pad(padded_dim, 0.0f);
-                    std::copy(final_centroids[i].begin(), final_centroids[i].end(), centroid_pad.begin());
-                    rabitqlib::quant::rabitq_impl::one_bit::one_bit_batch_code<float, false>(
-                        flat_data.data(),
-                        centroid_pad.data(),
-                        num,
-                        padded_dim,
-                        packed_codes.data(),
-                        f_add.data(),
-                        f_rescale.data(),
-                        f_err.data(),
-                        rabitqlib::METRIC_L2
-                    );
-                    out.write(reinterpret_cast<const char*>(packed_codes.data()), packed_codes.size());
-                    out.write(reinterpret_cast<const char*>(f_add.data()), sizeof(float) * num);
-                    out.write(reinterpret_cast<const char*>(f_rescale.data()), sizeof(float) * num);
-                    if (bq_bits > 1) {
-                        size_t ex_bits = bq_bits - 1;
-                        size_t ex_stride = rabitqlib::ExDataMap<float>::data_bytes(padded_dim, ex_bits);
-                        std::vector<uint8_t> ex_blob(ex_stride * num);
-                        char* ex_ptr = reinterpret_cast<char*>(ex_blob.data());
-                        for (size_t r = 0; r < num; ++r) {
-                            rabitqlib::quant::quantize_compact_ex_bits<float>(
-                                flat_data.data() + r * padded_dim,
-                                centroid_pad.data(),
-                                padded_dim,
-                                ex_bits,
-                                ex_ptr,
-                                rabitqlib::METRIC_L2,
-                                cfg
-                            );
-                            ex_ptr += ex_stride;
-                        }
-                        out.write(reinterpret_cast<const char*>(ex_blob.data()), ex_blob.size());
-                    }
-                    out.close();
-                }
+                build_small_bucket_bqbin(i, bucket_data, final_centroids[i], padded_dim, bq_bits, bq_path);
             }
         }
         
