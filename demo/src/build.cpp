@@ -5,6 +5,7 @@
 #include <array>
 #include <omp.h>
 #include <queue>
+#include <unordered_set>
 
 // rabitq deps
 #include "/home/danbai.wq/DiskANN/rabitq/rabitqlib/quantization/rabitq.hpp"
@@ -337,6 +338,106 @@ void build_large_bucket_bqgraph(
             // 更新稳定入口集合（保留少量代表点）
             stable_entries.push_back(u);
             if (stable_entries.size() > 64) stable_entries.erase(stable_entries.begin(), stable_entries.begin() + (stable_entries.size() - 64));
+        }
+    }
+
+    // --- Light saturation/interconnect refinement (degree-preserving) ---
+    {
+        bool enable_pass = true;
+        if (const char* env = std::getenv("BQ_SATURATE_PASS")) {
+            std::string v(env);
+            if (v == "0" || v == "false" || v == "False") enable_pass = false;
+        }
+        if (enable_pass && num > 0) {
+            const size_t code_cols = padded_dim / 8;
+            const size_t refine_C = std::min<size_t>(std::max<size_t>(graph_degree * 2, 64), std::max<size_t>(window_C, graph_degree * 2));
+
+            auto eval_from_query = [&](const std::vector<float>& q_pad, uint32_t idx)->float {
+                size_t base = (idx / 32) * 32; size_t pos = idx % 32;
+                const uint8_t* codes = packed_codes.data() + (base / 32) * (code_cols * 32);
+                std::array<uint16_t, rabitqlib::fastscan::kBatchSize> accu{};
+                rabitqlib::SplitBatchQuery<float> q(q_pad.data(), padded_dim, (bq_bits>1?bq_bits-1:0), rabitqlib::METRIC_L2, false);
+                float qn2=0.0f; for (size_t d=0; d<padded_dim; ++d) qn2 += q_pad[d]*q_pad[d]; q.set_g_add(std::sqrt(qn2), 0.0f);
+                rabitqlib::fastscan::accumulate(codes, q.lut(), accu.data(), padded_dim);
+                float ip_est = q.delta() * static_cast<float>(accu[pos]) + q.sum_vl_lut();
+                float dist_est = f_add[idx] + q.g_add() + f_rescale[idx] * (ip_est + q.k1xsumq());
+                if (bq_bits > 1 && !ex_blob.empty()) {
+                    size_t ex_bits = bq_bits - 1;
+                    size_t ex_stride = ExDataMap<float>::data_bytes(padded_dim, ex_bits);
+                    const char* ex_ptr = reinterpret_cast<const char*>(ex_blob.data()) + (idx * ex_stride);
+                    auto ip_func = select_excode_ipfunc(ex_bits);
+                    ConstExDataMap<float> ex_map(ex_ptr, padded_dim, ex_bits);
+                    float ex_dist = ex_map.f_add_ex() + q.g_add() + (ex_map.f_rescale_ex() *
+                        (static_cast<float>(1 << ex_bits) * (ip_est) + ip_func(q_pad.data(), ex_map.ex_code(), padded_dim) + q.kbxsumq()));
+                    dist_est = ex_dist;
+                }
+                return dist_est;
+            };
+
+            for (uint32_t u = 0; u < num; ++u) {
+                // Build query for u
+                std::vector<float> q_pad_u(padded_dim, 0.0f);
+                std::copy(bucket_padded[u].begin(), bucket_padded[u].end(), q_pad_u.begin());
+
+                // Current neighbor set and worst slot
+                std::vector<uint32_t> curr(graph_degree);
+                for (size_t t = 0; t < graph_degree; ++t) curr[t] = adj[u * graph_degree + t];
+                std::unordered_set<uint32_t> curr_set(curr.begin(), curr.end());
+                float worst_dist = -1.0f; size_t worst_pos = 0;
+                for (size_t t = 0; t < graph_degree; ++t) {
+                    uint32_t v = curr[t]; if (v >= num) continue;
+                    float dv = eval_from_query(q_pad_u, v);
+                    if (dv > worst_dist) { worst_dist = dv; worst_pos = t; }
+                }
+
+                // Entry points: current neighbors, fallback to self
+                std::vector<uint32_t> entry_pts; entry_pts.reserve(graph_degree);
+                for (uint32_t v : curr) if (v < num) entry_pts.push_back(v);
+                if (entry_pts.empty()) entry_pts.push_back(u);
+
+                // Collect candidate via graph around u
+                std::vector<std::pair<float,uint32_t>> cand; cand.reserve(refine_C);
+                collect_candidates_via_graph(entry_pts, inserted, adj, graph_degree, num,
+                    packed_codes, code_cols, padded_dim, bq_bits, ex_blob,
+                    f_add, f_rescale, q_pad_u, refine_C, cand);
+
+                bool replaced = false;
+                for (auto& kv : cand) {
+                    uint32_t y = kv.second; float d_uy = kv.first;
+                    if (y == u || y >= num || curr_set.count(y)) continue;
+                    if (d_uy < worst_dist) {
+                        // Replace worst neighbor of u with y
+                        adj[u * graph_degree + worst_pos] = y;
+                        curr_set.erase(curr[worst_pos]);
+                        curr_set.insert(y);
+                        curr[worst_pos] = y;
+
+                        // Weak interconnect: consider adding u into y's list by replacing its worst
+                        // Only if u not already present
+                        bool y_has_u = false;
+                        for (size_t t = 0; t < graph_degree; ++t) if (adj[y * graph_degree + t] == u) { y_has_u = true; break; }
+                        if (!y_has_u) {
+                            // Build query for y
+                            std::vector<float> q_pad_y(padded_dim, 0.0f);
+                            std::copy(bucket_padded[y].begin(), bucket_padded[y].end(), q_pad_y.begin());
+
+                            float worst_y = -1.0f; size_t worst_pos_y = 0;
+                            for (size_t t = 0; t < graph_degree; ++t) {
+                                uint32_t z = adj[y * graph_degree + t]; if (z >= num) continue;
+                                float d_yz = eval_from_query(q_pad_y, z);
+                                if (d_yz > worst_y) { worst_y = d_yz; worst_pos_y = t; }
+                            }
+                            float d_yu = eval_from_query(q_pad_y, u);
+                            if (d_yu < worst_y) {
+                                adj[y * graph_degree + worst_pos_y] = u;
+                            }
+                        }
+                        replaced = true;
+                        break; // only one replacement per u
+                    }
+                }
+                (void)replaced;
+            }
         }
     }
 

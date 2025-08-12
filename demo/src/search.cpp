@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <queue>
 #include <limits>
+#include <cstdlib>
 #include "index.h"
 #include "parameters.h"
 #include "kmeans.h"
@@ -309,12 +310,29 @@ static void bq_graph_search(
         return dist_est;
     };
 
-    // 简单的多源启动：选择若干均匀间隔的起点（避免依赖入口）
+    // 读取环境变量：efSearch 与 seeds 数量
+    size_t ef_search = 128;
+    if (const char* env = std::getenv("BQ_EF_SEARCH")) {
+        try { ef_search = std::max<size_t>(1, std::stoul(env)); } catch (...) {}
+    }
+    size_t num_seeds = 8;
+    if (const char* env = std::getenv("BQ_SEEDS")) {
+        try { num_seeds = std::max<size_t>(1, std::stoul(env)); } catch (...) {}
+    }
+
+    // 多种子入口：等间隔采样
     std::vector<uint32_t> entry_points;
     if (G.num_points > 0) {
-        entry_points.push_back(0);
-        if (G.num_points > 1024) entry_points.push_back(G.num_points / 2);
-        if (G.num_points > 1) entry_points.push_back(G.num_points - 1);
+        num_seeds = std::min(num_seeds, G.num_points);
+        if (num_seeds == 1) {
+            entry_points.push_back(0);
+        } else {
+            size_t stride = std::max<size_t>(1, G.num_points / num_seeds);
+            for (size_t i = 0; i < num_seeds; ++i) {
+                uint32_t ep = static_cast<uint32_t>(std::min(G.num_points - 1, i * stride));
+                if (entry_points.empty() || entry_points.back() != ep) entry_points.push_back(ep);
+            }
+        }
     }
 
     std::vector<char> visited(G.num_points, 0);
@@ -330,13 +348,15 @@ static void bq_graph_search(
     }
 
     std::vector<Node> best;
-    best.reserve(k);
+    best.reserve(std::max(k, static_cast<size_t>(ef_search)));
 
-    while (!cand_queue.empty() && best.size() < k * 10) { // 适度扩展
+    size_t expanded = 0;
+    while (!cand_queue.empty() && expanded < ef_search) {
         auto [cd, u] = cand_queue.top();
         cand_queue.pop();
         if (visited[u]) continue;
         visited[u] = 1;
+        ++expanded;
         best.emplace_back(cd, u);
 
         // 扩展邻居
@@ -350,8 +370,10 @@ static void bq_graph_search(
 
     // 选前 k 个
     size_t want = std::min(k, best.size());
-    std::nth_element(best.begin(), best.begin() + want, best.end());
-    best.resize(want);
+    if (best.size() > want) {
+        std::nth_element(best.begin(), best.begin() + want, best.end());
+        best.resize(want);
+    }
     out_local_cand.insert(out_local_cand.end(), best.begin(), best.end());
 }
 

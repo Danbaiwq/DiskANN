@@ -254,7 +254,7 @@ void search_mode(const std::string& query_path, const std::string& gt_path) {
     float beta = 0.0f; // 新增：加载beta参数
     double average_buckets_per_vector = 0.0; // 新增：加载平均分桶数
     int use_bq_flag = 0; // 新增：是否使用bq
-    size_t bq_bits = 12;  // 新增：bq bits
+    size_t bq_bits = 4;  // 新增：bq bits
     std::ifstream meta_reader("medoid_meta.txt");
     if (!meta_reader.is_open()) {
         std::cerr << "FATAL: medoid_meta.txt not found. Please run build mode first." << std::endl;
@@ -313,9 +313,13 @@ void search_mode(const std::string& query_path, const std::string& gt_path) {
     }
 
     // --- Set up the LRU Index Cache ---
-    const size_t cache_size_bytes = 1ULL * 1024 * 1024 * 1024; // 1 GB
+    const size_t cache_size_bytes = (use_bq_flag == 1 ? 0ULL : (1ULL * 1024 * 1024 * 1024)); // BQ模式下关闭缓存
     IndexCache bucket_index_cache(cache_size_bytes, dim, graph_degree);
-    std::cout << "LRU index cache initialized with a " << cache_size_bytes / (1024*1024) << "MB budget." << std::endl;
+    if (use_bq_flag != 1) {
+        std::cout << "LRU index cache initialized with a " << cache_size_bytes / (1024*1024) << "MB budget." << std::endl;
+    } else {
+        std::cout << "BQ mode detected: disabling Vamana LRU cache to save memory." << std::endl;
+    }
 
     // --- Parameters for Search Evaluation ---
     std::vector<size_t> f_values = {static_cast<size_t>(f)};
@@ -355,8 +359,10 @@ void search_mode(const std::string& query_path, const std::string& gt_path) {
         }
     }
     
-    // 输出缓存统计信息
-    bucket_index_cache.print_stats();
+    // 输出缓存统计信息（仅在非BQ模式下）
+    if (use_bq_flag != 1) {
+        bucket_index_cache.print_stats();
+    }
 }
 
 

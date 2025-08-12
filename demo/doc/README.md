@@ -784,9 +784,11 @@ BQ_EF_SEARCH=128 BQ_SEEDS=8 ./demo/demo_test /path/to/query.fbin /path/to/ground
   - `BQ_BITS`：量化比特（当前默认 12）
   - `BQ_GRAPH_THRESHOLD`：大桶阈值（≥ 阈值构 bqgraph，否则写 bq.bin）
   - 固定图参数（在 `main.cpp`）：`graph_degree=32`、`build_complexity=50`、`alpha=1.2`
+  - `BQ_SATURATE_PASS`：是否启用“轻量互连/饱和”微修复（度数不变，仅替换最差邻 + 弱互连补边），`1` 开启（默认），`0` 关闭
 - 查询端：
   - `BQ_EF_SEARCH`：bqgraph 搜索的 ef 宽度（默认 128）
   - `BQ_SEEDS`：入口种子数量（默认 8）。搜索种子综合 hub 与采样 seeds
+  - 运行期缓存：BQ 模式下自动禁用 Vamana LRU Cache（节省 ~1GB 内存）；RAW 模式保持启用
 
 ### 7.7 其它可选的构建优化（未启用，后续可考虑）
 - K 步交错插入（K-step interleaving）：将插入顺序按步长 K 交错分段，分段内串行或小并发，段与段之间并行，降低强相关点同批插入概率
@@ -796,4 +798,23 @@ BQ_EF_SEARCH=128 BQ_SEEDS=8 ./demo/demo_test /path/to/query.fbin /path/to/ground
 ### 7.8 注意事项
 - 维度对齐：fastscan LUT 按 32 批处理，`padded_dim = ceil(dim/4)*4`
 - 文件路径：运行时默认在当前工作目录读写（建议进入 `build/` 目录执行）
-- 兼容性：当前实现不包含弱互连、饱和 pass、自适应 C 与入口点策略细化，便于与 DiskANN 默认 Vamana 流程对齐并保持构建代价可控 
+- 兼容性：当前实现不包含弱互连、饱和 pass、自适应 C 与入口点策略细化，便于与 DiskANN 默认 Vamana 流程对齐并保持构建代价可控
+
+### 7.9 近期优化改进（已集成）
+- BQ 图搜索（召回提升）
+  - 引入 efSearch 风格的扩展，`BQ_EF_SEARCH` 控制扩展宽度（默认 128）
+  - 多入口 seeds（等间隔采样为主），`BQ_SEEDS` 控制数量（默认 8）
+- BQ 模式内存优化
+  - 搜索阶段自动禁用 Vamana LRU Cache，避免额外 ~1GB 内存占用
+- 构建端“轻量互连/饱和”微修复（度数不变）
+  - 通过 `BQ_SATURATE_PASS=1` 启用（默认开启），仅对每个点至多一次“替换最差邻”，并对对端做“弱互连”尝试
+  - 不增加索引体积与出度，仅提升可达性；可用 `BQ_SATURATE_PASS=0` 做 A/B
+
+示例：
+```bash
+# 构建（启用轻量互连/饱和修复）
+USE_BQ=1 BQ_BITS=12 BQ_SATURATE_PASS=1 ./demo/demo_test /path/to/base.fbin
+
+# 查询（ef 与 seeds 可按需调整；BQ 模式自动禁用 LRU Cache）
+BQ_EF_SEARCH=160 BQ_SEEDS=12 ./demo/demo_test /path/to/query.fbin /path/to/ground_truth.ivecs
+``` 
