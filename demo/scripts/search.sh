@@ -14,7 +14,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DEMO_BIN="${DEMO_BIN:-$REPO_ROOT/build/demo/demo_test}"
 
 # 索引产物所在目录（构建脚本写入的位置）
-INDEX_DIR="${INDEX_DIR:-$REPO_ROOT/build/demo_index}"
+INDEX_DIR="${INDEX_DIR:-/data/1/demo}"
 
 # 查询数据与评测 GT 路径（请设置为实际文件）
 QUERY_FBIN="${QUERY_FBIN:-$REPO_ROOT/build/data/sift_query.fbin}"            # 例：/data/sift_query.fbin
@@ -22,7 +22,7 @@ GROUNDTRUTH_IVECS="${GROUNDTRUTH_IVECS:-$REPO_ROOT/build/data/sift_query_base_gt
 
 # 查询参数（可按需调整）
 BQ_GRAPH_THRESHOLD="${BQ_GRAPH_THRESHOLD:-2000}"  # >= 阈值走 bqgraph，否则 bq.bin fastscan
-BQ_EF_SEARCH="${BQ_EF_SEARCH:-128}"             # bqgraph 的 ef 宽度
+BQ_EF_SEARCH="${BQ_EF_SEARCH:-256}"             # bqgraph 的 ef 宽度
 BQ_SEEDS="${BQ_SEEDS:-8}"                       # bqgraph 的入口点数
 # =====================================
 

@@ -14,7 +14,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DEMO_BIN="${DEMO_BIN:-$REPO_ROOT/build/demo/demo_test}"
 
 # 构建产物输出目录
-OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/build/demo_index}"
+OUTPUT_DIR="${OUTPUT_DIR:-/data/1/demo}"
 
 # 基础数据（base.fbin）路径（请设置为实际文件）
 BASE_FBIN="${BASE_FBIN:-$REPO_ROOT/build/data/sift_base.fbin}"    # 例：/data/sift_base.fbin
