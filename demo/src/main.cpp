@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <iomanip>  // 添加这个头文件用于std::fixed和std::setprecision
 #include <cmath>
+#include <filesystem>
 
 #include "utils.h"
 #include "kmeans.h"
@@ -21,6 +22,33 @@
 #include "/home/danbai.wq/DiskANN/rabitq/rabitqlib/quantization/data_layout.hpp"
 #include "/home/danbai.wq/DiskANN/rabitq/rabitqlib/fastscan/fastscan.hpp"
 #include "/home/danbai.wq/DiskANN/rabitq/rabitqlib/index/query.hpp"
+
+static inline std::string get_env_str(const char* key) {
+    const char* v = std::getenv(key);
+    return v ? std::string(v) : std::string();
+}
+
+static inline std::string join_path(const std::string& dir, const std::string& name) {
+    if (dir.empty()) return name;
+    if (dir.back() == '/') return dir + name;
+    return dir + "/" + name;
+}
+
+static inline std::string resolve_write_path(const std::string& name) {
+    std::string out_dir = get_env_str("DEMO_OUTPUT_DIR");
+    if (out_dir.empty()) return name;
+    // ensure directory exists
+    std::error_code ec;
+    std::filesystem::create_directories(out_dir, ec);
+    return join_path(out_dir, name);
+}
+
+static inline std::string resolve_read_path(const std::string& name) {
+    std::string in_dir = get_env_str("DEMO_INPUT_DIR");
+    if (in_dir.empty()) in_dir = get_env_str("DEMO_OUTPUT_DIR");
+    if (in_dir.empty()) return name;
+    return join_path(in_dir, name);
+}
 
 void build_mode(const std::string& data_path) {
     std::cout << "\n--- Running in BUILD mode ---" << std::endl;
@@ -129,8 +157,8 @@ void build_mode(const std::string& data_path) {
     double average_buckets_per_vector = static_cast<double>(total_bucket_assignments) / num_points;
     // --- Save Buckets & Metadata ---
     std::cout << "Saving bucket assignments and metadata..." << std::endl;
-    save_buckets("buckets.bin", buckets);
-    std::ofstream meta_writer("medoid_meta.txt");
+    save_buckets(resolve_write_path("buckets.bin"), buckets);
+    std::ofstream meta_writer(resolve_write_path("medoid_meta.txt"));
     meta_writer << dim << std::endl;
     meta_writer << graph_degree << std::endl;
     meta_writer << beta << std::endl;  // 保存beta参数到元数据
@@ -141,7 +169,7 @@ void build_mode(const std::string& data_path) {
 
     // --- Build Medoid Vamana Graph ---
     std::cout << "Building Medoid Vamana Graph (using " << threads_per_build << " threads)..." << std::endl;
-    build_and_save_vamana_graph(final_centroids, {}, "medoid_vamana.index", graph_degree, build_complexity, threads_per_build);
+    build_and_save_vamana_graph(final_centroids, {}, resolve_write_path("medoid_vamana.index"), graph_degree, build_complexity, threads_per_build);
 
     // --- Build Bucket Vamana Graphs (bucket间并行构建) ---
     const size_t MIN_BUCKET_SIZE_FOR_INDEX = 100;
@@ -188,7 +216,7 @@ void build_mode(const std::string& data_path) {
             bucket_data.push_back(get_point_copy(full_dataset_flat, point_idx, dim));
         }
         
-        std::string bucket_graph_path = "bucket_" + std::to_string(i) + "_vamana.index";
+        std::string bucket_graph_path = resolve_write_path("bucket_" + std::to_string(i) + "_vamana.index");
         
         if (!use_bq) {
             // 原始构图
@@ -201,11 +229,11 @@ void build_mode(const std::string& data_path) {
             }
             size_t padded_dim = (dim + 3) / 4 * 4;
             if (buckets[i].size() >= bq_graph_threshold) {
-                std::string gpath = "bucket_" + std::to_string(i) + "_bqgraph.bin";
+                std::string gpath = resolve_write_path("bucket_" + std::to_string(i) + "_bqgraph.bin");
                 BQBuildConfig cfg{ padded_dim, bq_bits, graph_degree, build_complexity, 1.2f };
                 build_large_bucket_bqgraph(i, bucket_data, final_centroids[i], cfg, gpath);
             } else {
-                std::string bq_path = "bucket_" + std::to_string(i) + "_bq.bin";
+                std::string bq_path = resolve_write_path("bucket_" + std::to_string(i) + "_bq.bin");
                 build_small_bucket_bqbin(i, bucket_data, final_centroids[i], padded_dim, bq_bits, bq_path);
             }
         }
@@ -255,7 +283,7 @@ void search_mode(const std::string& query_path, const std::string& gt_path) {
     double average_buckets_per_vector = 0.0; // 新增：加载平均分桶数
     int use_bq_flag = 0; // 新增：是否使用bq
     size_t bq_bits = 4;  // 新增：bq bits
-    std::ifstream meta_reader("medoid_meta.txt");
+    std::ifstream meta_reader(resolve_read_path("medoid_meta.txt"));
     if (!meta_reader.is_open()) {
         std::cerr << "FATAL: medoid_meta.txt not found. Please run build mode first." << std::endl;
         return;
@@ -301,12 +329,12 @@ void search_mode(const std::string& query_path, const std::string& gt_path) {
 
     // --- Load medoid Vamana graph ---
     std::cout << "Loading medoid Vamana graph..." << std::endl;
-    auto medoid_index = load_index("medoid_vamana.index", dim);
+    auto medoid_index = load_index(resolve_read_path("medoid_vamana.index"), dim);
     if (!medoid_index) exit(1);
 
     // --- Load bucket mapping ---
     std::cout << "Loading bucket mapping..." << std::endl;
-    auto buckets = load_buckets("buckets.bin");
+    auto buckets = load_buckets(resolve_read_path("buckets.bin"));
     if (buckets.empty()) {
         std::cerr << "Error: Failed to load buckets.bin or it is empty." << std::endl;
         exit(1);

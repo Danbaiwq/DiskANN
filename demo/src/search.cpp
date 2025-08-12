@@ -7,6 +7,7 @@
 #include <queue>
 #include <limits>
 #include <cstdlib>
+#include <filesystem>
 #include "index.h"
 #include "parameters.h"
 #include "kmeans.h"
@@ -17,6 +18,22 @@
 #include "/home/danbai.wq/DiskANN/rabitq/rabitqlib/fastscan/fastscan.hpp"
 #include "/home/danbai.wq/DiskANN/rabitq/rabitqlib/index/query.hpp"
 #include "/home/danbai.wq/DiskANN/rabitq/rabitqlib/utils/space.hpp"
+
+static inline std::string get_env_str_local(const char* key) {
+    const char* v = std::getenv(key);
+    return v ? std::string(v) : std::string();
+}
+static inline std::string join_path_local(const std::string& dir, const std::string& name) {
+    if (dir.empty()) return name;
+    if (dir.back() == '/') return dir + name;
+    return dir + "/" + name;
+}
+static inline std::string resolve_read_path_local(const std::string& name) {
+    std::string in_dir = get_env_str_local("DEMO_INPUT_DIR");
+    if (in_dir.empty()) in_dir = get_env_str_local("DEMO_OUTPUT_DIR");
+    if (in_dir.empty()) return name;
+    return join_path_local(in_dir, name);
+}
 
 std::shared_ptr<diskann::Index<float, uint32_t, uint32_t>> load_index(const std::string& index_path, const size_t dim) {
     if (!std::ifstream(index_path).good()) {
@@ -192,7 +209,7 @@ struct BQBucketData {
 };
 
 static bool load_bq_bucket(uint32_t bucket_id, BQBucketData& out) {
-    std::string path = "bucket_" + std::to_string(bucket_id) + "_bq.bin";
+    std::string path = resolve_read_path_local("bucket_" + std::to_string(bucket_id) + "_bq.bin");
     std::ifstream in(path, std::ios::binary);
     if (!in.is_open()) return false;
     uint64_t pd, bits, n;
@@ -235,7 +252,7 @@ struct BQGraphData {
 };
 
 static bool load_bq_graph(uint32_t bucket_id, BQGraphData& g) {
-    std::string path = "bucket_" + std::to_string(bucket_id) + "_bqgraph.bin";
+    std::string path = resolve_read_path_local("bucket_" + std::to_string(bucket_id) + "_bqgraph.bin");
     std::ifstream in(path, std::ios::binary);
     if (!in.is_open()) return false;
     uint64_t pd, bits, n, deg;

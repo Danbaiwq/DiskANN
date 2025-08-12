@@ -652,6 +652,42 @@ ls demo/demo_test
 ./demo/demo_test data/sift_query.fbin data/sift_query_learn_gt100
 ```
 
+### 6.4 脚本化运行（推荐）
+
+已提供脚本简化使用，直接在脚本顶部“用户配置区”填写路径与参数即可运行。
+
+- 构建脚本：`DiskANN/demo/scripts/build.sh`
+  - 配置项（脚本顶部修改）：
+    - `DEMO_BIN`：demo 可执行文件（默认 `build/demo/demo_test`）
+    - `OUTPUT_DIR`：构建产物输出目录（默认 `build/demo_out`）
+    - `BASE_FBIN`：基础数据路径（必填）
+    - `USE_BQ`：是否启用 BQ（默认 1）
+    - `BQ_BITS`：量化比特（默认 8）
+    - `BQ_GRAPH_THRESHOLD`：大桶阈值（默认 2000）
+    - `BQ_SATURATE_PASS`：轻量互连/饱和微修复（默认 1）
+  - 运行：
+    ```bash
+    DiskANN/demo/scripts/build.sh
+    ```
+
+- 查询脚本：`DiskANN/demo/scripts/search.sh`
+  - 配置项（脚本顶部修改）：
+    - `DEMO_BIN`：demo 可执行文件（默认 `build/demo/demo_test`）
+    - `INDEX_DIR`：索引产物读取目录（通常与构建 `OUTPUT_DIR` 相同）
+    - `QUERY_FBIN`：查询数据路径（必填）
+    - `GROUNDTRUTH_IVECS`：评测 GT 路径（必填）
+    - `BQ_GRAPH_THRESHOLD`：阈值（默认 2000）
+    - `BQ_EF_SEARCH`：bqgraph ef 宽度（默认 128）
+    - `BQ_SEEDS`：入口种子数量（默认 8）
+  - 运行：
+    ```bash
+    DiskANN/demo/scripts/search.sh
+    ```
+
+说明：
+- 脚本会通过程序提供的 `DEMO_OUTPUT_DIR/DEMO_INPUT_DIR` 将产物定向到自定义目录，便于分析磁盘占用。
+- BQ 模式下，查询阶段会自动禁用 Vamana LRU Cache（节省约 1GB 内存）。
+
 ## 7. 文件结构与输出
 
 **生成文件**：
