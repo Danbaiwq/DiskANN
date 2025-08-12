@@ -813,8 +813,8 @@ BQ_EF_SEARCH=128 BQ_SEEDS=8 ./demo/demo_test /path/to/query.fbin /path/to/ground
 示例：
 ```bash
 # 构建（启用轻量互连/饱和修复）
-USE_BQ=1 BQ_BITS=12 BQ_SATURATE_PASS=1 ./demo/demo_test /path/to/base.fbin
+USE_BQ=1 BQ_BITS=8 BQ_SATURATE_PASS=1 BQ_GRAPH_THRESHOLD=2000 ./demo/demo_test /path/to/base.fbin
 
 # 查询（ef 与 seeds 可按需调整；BQ 模式自动禁用 LRU Cache）
-BQ_EF_SEARCH=160 BQ_SEEDS=12 ./demo/demo_test /path/to/query.fbin /path/to/ground_truth.ivecs
+BQ_GRAPH_THRESHOLD=2000 BQ_EF_SEARCH=128 BQ_SEEDS=8 ./demo/demo_test /path/to/query.fbin /path/to/ground_truth.ivecs
 ``` 
