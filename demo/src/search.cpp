@@ -280,7 +280,6 @@ static bool load_bq_graph(uint32_t bucket_id, BQGraphData& g) {
     in.read(reinterpret_cast<char*>(g.f_add.data()), sizeof(float) * g.num_points);
     in.read(reinterpret_cast<char*>(g.f_rescale.data()), sizeof(float) * g.num_points);
     // ex_data（若存在则剩余区间为 ex_blob + 邻接表）
-    // 剩余字节数 = 总文件 - 已读；但这里简单按 bits 判断是否有 ex_blob
     if (g.bits > 1) {
         size_t ex_stride = rabitqlib::ExDataMap<float>::data_bytes(g.padded_dim, g.bits - 1);
         g.ex_blob.resize(ex_stride * g.num_points);
@@ -540,11 +539,16 @@ QueryResult search_two_stage(
         const char* base_fbin_env = std::getenv("BASE_FBIN");
         if (base_fbin_env && base_fbin_env[0] != '\0' && !candidates.empty() && top_k > 0) {
             std::string base_fbin_path(base_fbin_env);
-            int flags = O_RDONLY;
-            if (std::getenv("RERANK_O_DIRECT")) { flags |= O_DIRECT; }
+            // 默认对齐 DiskANN：优先使用 O_DIRECT；若显式设置 RERANK_O_DIRECT=0 则关闭
+            bool force_odirect = true;
+            if (const char* env_od = std::getenv("RERANK_O_DIRECT")) {
+                std::string v(env_od);
+                if (v == "0" || v == "false" || v == "False") force_odirect = false;
+            }
+            int flags = O_RDONLY | (force_odirect ? O_DIRECT : 0);
             int fd = ::open(base_fbin_path.c_str(), flags);
             if (fd >= 0) {
-                // 优先使用 pread 做通用真距复排（不依赖页缓存）。
+                // 优先使用 pread 做通用真距复排（尽量不依赖页缓存）。
                 do {
                     // header 用普通方式读取，避免 O_DIRECT 对齐限制
                     uint32_t hdr_u32[2] = {0, 0};
@@ -562,18 +566,17 @@ QueryResult search_two_stage(
                     std::vector<std::pair<float, uint32_t>> rerank_pairs;
                     rerank_pairs.reserve(candidates.size());
                     std::vector<float> buf(base_dim);
-                    const bool odirect_on = (flags & O_DIRECT) != 0;
+                    const bool odirect_on = force_odirect;
                     const size_t vec_bytes = sizeof(float) * base_dim;
-                    const long bs_l = ::sysconf(_SC_PAGESIZE);
-                    const size_t bs = bs_l > 0 ? static_cast<size_t>(bs_l) : 4096ULL;
+                    // 参考 DiskANN：对齐到 512 字节而非页面大小
+                    const size_t bs = 512ULL;
                     // 统一的对齐读缓冲（最大需要 vec_bytes + bs 向上取整）
                     size_t aligned_cap = ((vec_bytes + bs) + (bs - 1)) & ~(bs - 1);
                     void* od_buf = nullptr;
                     if (odirect_on) {
                         if (posix_memalign(&od_buf, bs, aligned_cap) != 0) od_buf = nullptr;
-                        // std::cout << "[rerank] pread: O_DIRECT=1 bs=" << bs << " vec_bytes=" << vec_bytes << std::endl;
                     }
-                    auto read_vec = [&](int fd_r, off_t off)->bool{
+                    auto read_vec_od = [&](int fd_r, off_t off)->bool{
                         if (!odirect_on || od_buf == nullptr) {
                             ssize_t br = ::pread(fd_r, reinterpret_cast<char*>(buf.data()), vec_bytes, off);
                             return br == static_cast<ssize_t>(vec_bytes);
@@ -589,11 +592,13 @@ QueryResult search_two_stage(
                         }
                     };
                     size_t skipped_oob = 0, short_reads = 0;
+                    size_t success_reads = 0;
                     for (size_t i = 0; i < candidates.size(); ++i) {
                         uint32_t gid = candidates[i].second;
                         if (gid >= base_num) { skipped_oob++; continue; }
                         const off_t off = header_bytes + static_cast<off_t>(sizeof(float)) * static_cast<off_t>(gid) * static_cast<off_t>(base_dim);
-                        if (!read_vec(fd, off)) { short_reads++; continue; }
+                        if (!read_vec_od(fd, off)) { short_reads++; continue; }
+                        success_reads++;
                         float dist = 0.0f;
                         for (size_t d = 0; d < base_dim; ++d) {
                             float diff = buf[d] - query[d];
@@ -612,42 +617,33 @@ QueryResult search_two_stage(
                             final_results_r.ids.push_back(rerank_pairs[i].second);
                         }
                         if (skipped_oob > 0 || short_reads > 0) {
-                            std::cout << "[rerank] pread: skipped_oob=" << skipped_oob << ", short_reads=" << short_reads << std::endl;
+                            std::cout << "[rerank] pread(" << (odirect_on ? "O_DIRECT" : "plain") << "): skipped_oob="
+                                      << skipped_oob << ", short_reads=" << short_reads << std::endl;
                         }
                         ::close(fd);
                         return final_results_r;
                     }
-                } while(false);
-
-                struct stat st{};
-                if (::fstat(fd, &st) == 0 && st.st_size >= static_cast<off_t>(sizeof(uint32_t) * 2)) {
-                    void* map = ::mmap(nullptr, st.st_size, PROT_READ, MAP_SHARED, fd, 0);
-                    if (map != MAP_FAILED) {
-                        const char* base_ptr = static_cast<const char*>(map);
-                        const uint32_t* hdr = reinterpret_cast<const uint32_t*>(base_ptr);
-                        size_t base_num = hdr[0];
-                        size_t base_dim = hdr[1];
-                        if (base_dim == dim) {
-                            const float* vec_base = reinterpret_cast<const float*>(base_ptr + sizeof(uint32_t) * 2);
-                            std::vector<std::pair<float, uint32_t>> rerank_pairs;
-                            rerank_pairs.reserve(candidates.size());
-                            size_t skipped_oob = 0;
-                            // std::cout << "[rerank] BASE_FBIN enabled. candidates=" << candidates.size()
-                            //          << ", base_num=" << base_num << ", dim=" << dim << std::endl;
+                    // 若 O_DIRECT 路径未能成功读取，则回退为普通 pread（不 mmap）
+                    if (odirect_on) {
+                        std::cout << "[rerank] O_DIRECT path yielded no pairs, fallback to plain pread" << std::endl;
+                        int fd_plain = ::open(base_fbin_path.c_str(), O_RDONLY);
+                        if (fd_plain >= 0) {
+                            rerank_pairs.clear();
+                            skipped_oob = 0; short_reads = 0;
                             for (size_t i = 0; i < candidates.size(); ++i) {
                                 uint32_t gid = candidates[i].second;
                                 if (gid >= base_num) { skipped_oob++; continue; }
-                                const float* vec = vec_base + static_cast<size_t>(gid) * base_dim;
+                                const off_t off = header_bytes + static_cast<off_t>(sizeof(float)) * static_cast<off_t>(gid) * static_cast<off_t>(base_dim);
+                                ssize_t br = ::pread(fd_plain, reinterpret_cast<char*>(buf.data()), vec_bytes, off);
+                                if (br != static_cast<ssize_t>(vec_bytes)) { short_reads++; continue; }
                                 float dist = 0.0f;
                                 for (size_t d = 0; d < base_dim; ++d) {
-                                    float diff = vec[d] - query[d];
+                                    float diff = buf[d] - query[d];
                                     dist += diff * diff;
                                 }
                                 rerank_pairs.emplace_back(dist, gid);
                             }
-                            if (skipped_oob > 0) {
-                                std::cout << "[rerank] skipped out-of-range ids: " << skipped_oob << std::endl;
-                            }
+                            ::close(fd_plain);
                             if (!rerank_pairs.empty()) {
                                 std::sort(rerank_pairs.begin(), rerank_pairs.end());
                                 QueryResult final_results_r;
@@ -657,14 +653,69 @@ QueryResult search_two_stage(
                                     final_results_r.distances.push_back(rerank_pairs[i].first);
                                     final_results_r.ids.push_back(rerank_pairs[i].second);
                                 }
-                                ::munmap(map, st.st_size);
+                                if (skipped_oob > 0 || short_reads > 0) {
+                                    std::cout << "[rerank] pread(plain): skipped_oob=" << skipped_oob
+                                              << ", short_reads=" << short_reads << std::endl;
+                                }
                                 ::close(fd);
                                 return final_results_r;
                             }
-                        } else {
-                            std::cout << "[rerank] skip: base_dim(" << base_dim << ") != dim(" << dim << ")" << std::endl;
                         }
-                        ::munmap(map, st.st_size);
+                    }
+                } while(false);
+
+                // 是否允许 mmap 回退：仅在 RERANK_USE_MMAP=1 时启用
+                bool allow_mmap = false;
+                if (const char* env_mm = std::getenv("RERANK_USE_MMAP")) {
+                    std::string v(env_mm);
+                    if (v == "1" || v == "true" || v == "True") allow_mmap = true;
+                }
+                if (allow_mmap) {
+                    struct stat st{};
+                    if (::fstat(fd, &st) == 0 && st.st_size >= static_cast<off_t>(sizeof(uint32_t) * 2)) {
+                        void* map = ::mmap(nullptr, st.st_size, PROT_READ, MAP_SHARED, fd, 0);
+                        if (map != MAP_FAILED) {
+                            const char* base_ptr = static_cast<const char*>(map);
+                            const uint32_t* hdr = reinterpret_cast<const uint32_t*>(base_ptr);
+                            size_t base_num = hdr[0];
+                            size_t base_dim = hdr[1];
+                            if (base_dim == dim) {
+                                const float* vec_base = reinterpret_cast<const float*>(base_ptr + sizeof(uint32_t) * 2);
+                                std::vector<std::pair<float, uint32_t>> rerank_pairs;
+                                rerank_pairs.reserve(candidates.size());
+                                size_t skipped_oob = 0;
+                                for (size_t i = 0; i < candidates.size(); ++i) {
+                                    uint32_t gid = candidates[i].second;
+                                    if (gid >= base_num) { skipped_oob++; continue; }
+                                    const float* vec = vec_base + static_cast<size_t>(gid) * base_dim;
+                                    float dist = 0.0f;
+                                    for (size_t d = 0; d < base_dim; ++d) {
+                                        float diff = vec[d] - query[d];
+                                        dist += diff * diff;
+                                    }
+                                    rerank_pairs.emplace_back(dist, gid);
+                                }
+                                if (skipped_oob > 0) {
+                                    std::cout << "[rerank] skipped out-of-range ids: " << skipped_oob << std::endl;
+                                }
+                                if (!rerank_pairs.empty()) {
+                                    std::sort(rerank_pairs.begin(), rerank_pairs.end());
+                                    QueryResult final_results_r;
+                                    final_results_r.ids.reserve(std::min(top_k, rerank_pairs.size()));
+                                    final_results_r.distances.reserve(std::min(top_k, rerank_pairs.size()));
+                                    for (size_t i = 0; i < std::min(top_k, rerank_pairs.size()); ++i) {
+                                        final_results_r.distances.push_back(rerank_pairs[i].first);
+                                        final_results_r.ids.push_back(rerank_pairs[i].second);
+                                    }
+                                    ::munmap(map, st.st_size);
+                                    ::close(fd);
+                                    return final_results_r;
+                                }
+                            } else {
+                                std::cout << "[rerank] skip: base_dim(" << base_dim << ") != dim(" << dim << ")" << std::endl;
+                            }
+                            ::munmap(map, st.st_size);
+                        }
                     }
                 }
                 ::close(fd);

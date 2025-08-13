@@ -272,8 +272,8 @@ void search_mode(const std::string& query_path, const std::string& gt_path) {
     std::cout << "\n--- Running in SEARCH mode ---" << std::endl;
 
     // --- Parameters ---
-    const int f = 4; // Number of buckets to search
-    const int k = 100; // Number of neighbors to retrieve per bucket
+    const int f = 6; // Number of buckets to search
+    const int k = 50; // Number of neighbors to retrieve per bucket
     const int num_threads = std::thread::hardware_concurrency();
 
     // --- Load metadata ---
