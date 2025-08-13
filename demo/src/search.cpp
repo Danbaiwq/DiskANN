@@ -19,6 +19,12 @@
 #include "/home/danbai.wq/DiskANN/rabitq/rabitqlib/index/query.hpp"
 #include "/home/danbai.wq/DiskANN/rabitq/rabitqlib/utils/space.hpp"
 
+// 新增：mmap 读取 base.fbin 用于真距复排
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+
 static inline std::string get_env_str_local(const char* key) {
     const char* v = std::getenv(key);
     return v ? std::string(v) : std::string();
@@ -528,6 +534,143 @@ QueryResult search_two_stage(
     
     
     std::sort(candidates.begin(), candidates.end());
+
+    // 若提供 BASE_FBIN，则对所有 candidates 用真距复排（mmap 方式），避免额外内存占用
+    {
+        const char* base_fbin_env = std::getenv("BASE_FBIN");
+        if (base_fbin_env && base_fbin_env[0] != '\0' && !candidates.empty() && top_k > 0) {
+            std::string base_fbin_path(base_fbin_env);
+            int flags = O_RDONLY;
+            if (std::getenv("RERANK_O_DIRECT")) { flags |= O_DIRECT; }
+            int fd = ::open(base_fbin_path.c_str(), flags);
+            if (fd >= 0) {
+                // 优先使用 pread 做通用真距复排（不依赖页缓存）。
+                do {
+                    // header 用普通方式读取，避免 O_DIRECT 对齐限制
+                    uint32_t hdr_u32[2] = {0, 0};
+                    int fd_meta = ::open(base_fbin_path.c_str(), O_RDONLY);
+                    if (fd_meta < 0) break;
+                    ssize_t hread = ::pread(fd_meta, hdr_u32, sizeof(hdr_u32), 0);
+                    ::close(fd_meta);
+                    if (hread != static_cast<ssize_t>(sizeof(hdr_u32))) break;
+                    size_t base_num = hdr_u32[0], base_dim = hdr_u32[1];
+                    if (base_dim != dim) {
+                        std::cout << "[rerank] skip: base_dim(" << base_dim << ") != dim(" << dim << ")" << std::endl;
+                        break;
+                    }
+                    const off_t header_bytes = static_cast<off_t>(sizeof(uint32_t) * 2);
+                    std::vector<std::pair<float, uint32_t>> rerank_pairs;
+                    rerank_pairs.reserve(candidates.size());
+                    std::vector<float> buf(base_dim);
+                    const bool odirect_on = (flags & O_DIRECT) != 0;
+                    const size_t vec_bytes = sizeof(float) * base_dim;
+                    const long bs_l = ::sysconf(_SC_PAGESIZE);
+                    const size_t bs = bs_l > 0 ? static_cast<size_t>(bs_l) : 4096ULL;
+                    // 统一的对齐读缓冲（最大需要 vec_bytes + bs 向上取整）
+                    size_t aligned_cap = ((vec_bytes + bs) + (bs - 1)) & ~(bs - 1);
+                    void* od_buf = nullptr;
+                    if (odirect_on) {
+                        if (posix_memalign(&od_buf, bs, aligned_cap) != 0) od_buf = nullptr;
+                        // std::cout << "[rerank] pread: O_DIRECT=1 bs=" << bs << " vec_bytes=" << vec_bytes << std::endl;
+                    }
+                    auto read_vec = [&](int fd_r, off_t off)->bool{
+                        if (!odirect_on || od_buf == nullptr) {
+                            ssize_t br = ::pread(fd_r, reinterpret_cast<char*>(buf.data()), vec_bytes, off);
+                            return br == static_cast<ssize_t>(vec_bytes);
+                        } else {
+                            off_t aligned_start = (off / static_cast<off_t>(bs)) * static_cast<off_t>(bs);
+                            size_t inner = static_cast<size_t>(off - aligned_start);
+                            size_t aligned_len = (inner + vec_bytes + (bs - 1)) & ~(bs - 1);
+                            ssize_t br = ::pread(fd_r, od_buf, aligned_len, aligned_start);
+                            if (br != static_cast<ssize_t>(aligned_len)) return false;
+                            const char* p = static_cast<const char*>(od_buf) + inner;
+                            std::memcpy(buf.data(), p, vec_bytes);
+                            return true;
+                        }
+                    };
+                    size_t skipped_oob = 0, short_reads = 0;
+                    for (size_t i = 0; i < candidates.size(); ++i) {
+                        uint32_t gid = candidates[i].second;
+                        if (gid >= base_num) { skipped_oob++; continue; }
+                        const off_t off = header_bytes + static_cast<off_t>(sizeof(float)) * static_cast<off_t>(gid) * static_cast<off_t>(base_dim);
+                        if (!read_vec(fd, off)) { short_reads++; continue; }
+                        float dist = 0.0f;
+                        for (size_t d = 0; d < base_dim; ++d) {
+                            float diff = buf[d] - query[d];
+                            dist += diff * diff;
+                        }
+                        rerank_pairs.emplace_back(dist, gid);
+                    }
+                    if (od_buf) { free(od_buf); }
+                    if (!rerank_pairs.empty()) {
+                        std::sort(rerank_pairs.begin(), rerank_pairs.end());
+                        QueryResult final_results_r;
+                        final_results_r.ids.reserve(std::min(top_k, rerank_pairs.size()));
+                        final_results_r.distances.reserve(std::min(top_k, rerank_pairs.size()));
+                        for (size_t i = 0; i < std::min(top_k, rerank_pairs.size()); ++i) {
+                            final_results_r.distances.push_back(rerank_pairs[i].first);
+                            final_results_r.ids.push_back(rerank_pairs[i].second);
+                        }
+                        if (skipped_oob > 0 || short_reads > 0) {
+                            std::cout << "[rerank] pread: skipped_oob=" << skipped_oob << ", short_reads=" << short_reads << std::endl;
+                        }
+                        ::close(fd);
+                        return final_results_r;
+                    }
+                } while(false);
+
+                struct stat st{};
+                if (::fstat(fd, &st) == 0 && st.st_size >= static_cast<off_t>(sizeof(uint32_t) * 2)) {
+                    void* map = ::mmap(nullptr, st.st_size, PROT_READ, MAP_SHARED, fd, 0);
+                    if (map != MAP_FAILED) {
+                        const char* base_ptr = static_cast<const char*>(map);
+                        const uint32_t* hdr = reinterpret_cast<const uint32_t*>(base_ptr);
+                        size_t base_num = hdr[0];
+                        size_t base_dim = hdr[1];
+                        if (base_dim == dim) {
+                            const float* vec_base = reinterpret_cast<const float*>(base_ptr + sizeof(uint32_t) * 2);
+                            std::vector<std::pair<float, uint32_t>> rerank_pairs;
+                            rerank_pairs.reserve(candidates.size());
+                            size_t skipped_oob = 0;
+                            // std::cout << "[rerank] BASE_FBIN enabled. candidates=" << candidates.size()
+                            //          << ", base_num=" << base_num << ", dim=" << dim << std::endl;
+                            for (size_t i = 0; i < candidates.size(); ++i) {
+                                uint32_t gid = candidates[i].second;
+                                if (gid >= base_num) { skipped_oob++; continue; }
+                                const float* vec = vec_base + static_cast<size_t>(gid) * base_dim;
+                                float dist = 0.0f;
+                                for (size_t d = 0; d < base_dim; ++d) {
+                                    float diff = vec[d] - query[d];
+                                    dist += diff * diff;
+                                }
+                                rerank_pairs.emplace_back(dist, gid);
+                            }
+                            if (skipped_oob > 0) {
+                                std::cout << "[rerank] skipped out-of-range ids: " << skipped_oob << std::endl;
+                            }
+                            if (!rerank_pairs.empty()) {
+                                std::sort(rerank_pairs.begin(), rerank_pairs.end());
+                                QueryResult final_results_r;
+                                final_results_r.ids.reserve(std::min(top_k, rerank_pairs.size()));
+                                final_results_r.distances.reserve(std::min(top_k, rerank_pairs.size()));
+                                for (size_t i = 0; i < std::min(top_k, rerank_pairs.size()); ++i) {
+                                    final_results_r.distances.push_back(rerank_pairs[i].first);
+                                    final_results_r.ids.push_back(rerank_pairs[i].second);
+                                }
+                                ::munmap(map, st.st_size);
+                                ::close(fd);
+                                return final_results_r;
+                            }
+                        } else {
+                            std::cout << "[rerank] skip: base_dim(" << base_dim << ") != dim(" << dim << ")" << std::endl;
+                        }
+                        ::munmap(map, st.st_size);
+                    }
+                }
+                ::close(fd);
+            }
+        }
+    }
 
     QueryResult final_results;
     final_results.ids.reserve(std::min(top_k, candidates.size()));

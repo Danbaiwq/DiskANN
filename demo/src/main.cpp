@@ -300,7 +300,7 @@ void search_mode(const std::string& query_path, const std::string& gt_path) {
     std::cout << "Read metadata: use_bq=" << use_bq_flag << ", bits=" << bq_bits << std::endl;
 
     // 读取 BQ_GRAPH_THRESHOLD 环境变量，默认 1000
-    size_t bq_graph_threshold = 1000;
+    size_t bq_graph_threshold = 5000;
     if (const char* env_thr = std::getenv("BQ_GRAPH_THRESHOLD")) {
         try { bq_graph_threshold = std::stoul(env_thr); } catch (...) {}
     }

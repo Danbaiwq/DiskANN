@@ -17,12 +17,12 @@ DEMO_BIN="${DEMO_BIN:-$REPO_ROOT/build/demo/demo_test}"
 OUTPUT_DIR="${OUTPUT_DIR:-/data/1/demo}"
 
 # 基础数据（base.fbin）路径（请设置为实际文件）
-BASE_FBIN="${BASE_FBIN:-$REPO_ROOT/build/data/sift_base.fbin}"    # 例：/data/sift_base.fbin
+BASE_FBIN="${BASE_FBIN:-$REPO_ROOT/build/data/gist_base.fbin}"    # 例：/data/sift_base.fbin
 
 # 构建参数（可按需调整）
 USE_BQ="${USE_BQ:-1}"                 # 1 启用 BQ 模式；0 构 raw 的 bucket_vamana.index
-BQ_BITS="${BQ_BITS:-8}"                # 量化比特总数
-BQ_GRAPH_THRESHOLD="${BQ_GRAPH_THRESHOLD:-2000}"  # >= 阈值构 bqgraph，否则 bq.bin
+BQ_BITS="${BQ_BITS:-4}"                # 量化比特总数
+BQ_GRAPH_THRESHOLD="${BQ_GRAPH_THRESHOLD:-8000}"  # >= 阈值构 bqgraph，否则 bq.bin
 BQ_SATURATE_PASS="${BQ_SATURATE_PASS:-1}"        # 轻量互连/饱和微修复（度不增）
 # =====================================
 

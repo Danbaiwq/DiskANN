@@ -854,3 +854,47 @@ USE_BQ=1 BQ_BITS=8 BQ_SATURATE_PASS=1 BQ_GRAPH_THRESHOLD=2000 ./demo/demo_test /
 # 查询（ef 与 seeds 可按需调整；BQ 模式自动禁用 LRU Cache）
 BQ_GRAPH_THRESHOLD=2000 BQ_EF_SEARCH=128 BQ_SEEDS=8 ./demo/demo_test /path/to/query.fbin /path/to/ground_truth.ivecs
 ``` 
+
+### 7.10 末端真距复排（BASE_FBIN + mmap / pread(O_DIRECT)）
+为解决不同桶 BQ 估计距离跨桶不可比的问题，demo 在合并 f×k 候选后，支持“按原始向量真 L2 距离复排”的通用实现，确保最终 Top-K 基于同一度量准则：
+
+- 开关与环境变量
+  - 必需：`BASE_FBIN` 指向原始向量库（与构建一致的 `<base>.fbin`）。
+  - 可选：`RERANK_O_DIRECT`（默认 1，已在脚本中启用）。为 1 时优先使用对齐的 `pread + O_DIRECT` 做随机读取；失败自动回退普通 `pread`，再不行回退 `mmap`。
+  - 已在脚本透传：`DiskANN/demo/scripts/search.sh`、`DiskANN/perf/demo_search_monitor.sh`。
+
+- 行为与内存占用
+  - 复排范围：对全部 f×k 候选进行真距计算与重排（不再依赖“仅前 M 个”）。
+  - I/O 路径优先级：`pread(O_DIRECT, 对齐)` → `pread` → `mmap`（只读映射）。
+  - 内存：不复制全量 base 数据；`mmap` 为文件页映射（RssFile），`pread` 仅用一个对齐缓冲复用（大小≈向量维度×4B）。整体内存占用与 DiskANN 行为对齐。
+
+- 监控与观测
+  - 若命中页缓存或使用 `mmap`，`read_bytes` 可能接近 0；`read_chars` 反映逻辑读；`major_faults_s` 峰值对应从盘取页。
+  - 启用 `RERANK_O_DIRECT=1` 时（文件系统支持且满足对齐），可在冷数据下明显看到 `read_kbs` 上升，绕过页缓存更易反映真实盘读。
+
+- 使用示例
+```bash
+# 推荐用脚本，已默认透传 BASE_FBIN 与 RERANK_O_DIRECT=1
+# 修改脚本顶部 BASE_FBIN 指向你的 base.fbin
+/home/danbai.wq/DiskANN/demo/scripts/search.sh
+# 或带监控
+/home/danbai.wq/DiskANN/perf/demo_search_monitor.sh
+```
+
+- 效果
+  - f 增大不会再因跨桶估计距混排而降低召回；通常召回更稳定或提升。
+  - 在大数据/冷数据场景下，`pread(O_DIRECT)` 复排更通用，且不引入额外内存开销。 
+
+#### 代码定位（便于查阅实现）
+- `demo/src/search.cpp`
+  - `search_two_stage(...)`：两阶段搜索主体；候选合并、去重、最终排序与“真距复排”入口逻辑（`BASE_FBIN` 分支）。
+  - `bq_graph_search(...)`：大桶 `bqgraph` 搜索与候选生成。
+  - `load_bq_graph(...)`、`load_bq_bucket(...)`：读取 `bucket_*.bqgraph.bin` 与 `bucket_*.bq.bin` 的文件解析。
+  - `IndexCache::get_non_blocking(...)`、`load_index(...)`：RAW 模式下按需加载 `bucket_*.vamana.index`（非阻塞缓存 + DiskANN 索引加载）。
+- `demo/src/main.cpp`
+  - `search_mode(...)`：读取 `BQ_GRAPH_THRESHOLD`、`BQ_EF_SEARCH`、`BQ_SEEDS`、`BASE_FBIN` 等运行时环境，加载 `medoid_vamana.index` 与 `buckets.bin`，并驱动评测与统计。
+- `demo/src/utils.cpp`
+  - `load_fbin_flat(...)`：读取 `*.fbin`（用于构建/查询向量载入）。
+  - `load_buckets(...)`、`save_buckets(...)`：桶内局部ID与全局ID映射读写。
+- 脚本
+  - `demo/scripts/search.sh`、`perf/demo_search_monitor.sh`：提供 `BASE_FBIN` 与 `RERANK_O_DIRECT` 的默认配置与透传；一键运行与监控。 
