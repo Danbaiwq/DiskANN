@@ -25,6 +25,13 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+// 新增：缓存所需
+#include <shared_mutex>
+#include <unordered_map>
+#include <list>
+#include <functional>
+#include <mutex>
+
 static inline std::string get_env_str_local(const char* key) {
     const char* v = std::getenv(key);
     return v ? std::string(v) : std::string();
@@ -214,6 +221,101 @@ struct BQBucketData {
     std::vector<uint8_t> ex_blob;
 };
 
+// 新增：大桶 BQ 图数据结构与加载器
+struct BQGraphData {
+    size_t padded_dim{0};
+    size_t bits{4};
+    size_t num_points{0};
+    size_t degree{0};
+    std::vector<uint8_t> bin_codes;   // packed codes
+    std::vector<float> f_add;
+    std::vector<float> f_rescale;
+    std::vector<uint8_t> ex_blob;     // 可选
+    std::vector<uint32_t> adj;        // 邻接表（按行存储，num_points * degree）
+};
+
+// --- 新增：BQ 产物缓存（非阻塞，内存受限 LRU） ---
+namespace {
+static inline size_t estimate_bucket_bytes(const BQBucketData& b) {
+    size_t bytes = b.bin_codes.size();
+    bytes += b.f_add.size() * sizeof(float);
+    bytes += b.f_rescale.size() * sizeof(float);
+    bytes += b.ex_blob.size();
+    return bytes;
+}
+static inline size_t estimate_graph_bytes(const BQGraphData& g) {
+    size_t bytes = g.bin_codes.size();
+    bytes += g.f_add.size() * sizeof(float);
+    bytes += g.f_rescale.size() * sizeof(float);
+    bytes += g.ex_blob.size();
+    bytes += g.adj.size() * sizeof(uint32_t);
+    return bytes;
+}
+
+template <typename T, size_t (*estimate_bytes)(const T&)> class SimpleLRUCache {
+public:
+    explicit SimpleLRUCache(size_t max_bytes) : max_bytes_(max_bytes), cur_bytes_(0) {}
+
+    std::shared_ptr<const T> get(uint32_t key) {
+        std::shared_lock<std::shared_mutex> lk(mtx_);
+        auto it = map_.find(key);
+        if (it == map_.end()) return nullptr;
+        return it->second.value;
+    }
+
+    std::shared_ptr<const T> get_or_load(uint32_t key, const std::function<bool(T&)>& loader) {
+        if (max_bytes_ == 0) {
+            auto obj = std::make_shared<T>();
+            if (!loader(*obj)) return nullptr;
+            return obj;
+        }
+        {
+            std::shared_lock<std::shared_mutex> rlk(mtx_);
+            auto it = map_.find(key);
+            if (it != map_.end()) return it->second.value;
+        }
+        auto loaded = std::make_shared<T>();
+        if (!loader(*loaded)) return nullptr;
+        size_t need = estimate_bytes(*loaded);
+        std::unique_lock<std::shared_mutex> wlk(mtx_, std::try_to_lock);
+        if (!wlk.owns_lock()) {
+            return loaded;
+        }
+        auto it2 = map_.find(key);
+        if (it2 != map_.end()) return it2->second.value;
+        size_t evicted = 0;
+        while (cur_bytes_ + need > max_bytes_ && !lru_.empty() && evicted < 3) {
+            uint32_t k = lru_.back();
+            lru_.pop_back();
+            auto it = map_.find(k);
+            if (it != map_.end()) {
+                cur_bytes_ -= it->second.bytes;
+                map_.erase(it);
+            }
+            evicted++;
+        }
+        if (cur_bytes_ + need > max_bytes_) {
+            return loaded;
+        }
+        lru_.push_front(key);
+        map_[key] = Node{loaded, need};
+        cur_bytes_ += need;
+        return loaded;
+    }
+
+private:
+    struct Node { std::shared_ptr<const T> value; size_t bytes; };
+    size_t max_bytes_;
+    size_t cur_bytes_;
+    mutable std::shared_mutex mtx_;
+    std::list<uint32_t> lru_;
+    std::unordered_map<uint32_t, Node> map_;
+};
+
+using BQBucketCache = SimpleLRUCache<BQBucketData, estimate_bucket_bytes>;
+using BQGraphCache  = SimpleLRUCache<BQGraphData,  estimate_graph_bytes>;
+}
+
 static bool load_bq_bucket(uint32_t bucket_id, BQBucketData& out) {
     std::string path = resolve_read_path_local("bucket_" + std::to_string(bucket_id) + "_bq.bin");
     std::ifstream in(path, std::ios::binary);
@@ -235,7 +337,6 @@ static bool load_bq_bucket(uint32_t bucket_id, BQBucketData& out) {
     in.read(reinterpret_cast<char*>(out.f_add.data()), sizeof(float) * out.num_points);
     in.read(reinterpret_cast<char*>(out.f_rescale.data()), sizeof(float) * out.num_points);
 
-    // 读取 ex_data（若存在）
     if (out.bits > 1) {
         size_t ex_stride = rabitqlib::ExDataMap<float>::data_bytes(out.padded_dim, out.bits - 1);
         out.ex_blob.resize(ex_stride * out.num_points);
@@ -243,19 +344,6 @@ static bool load_bq_bucket(uint32_t bucket_id, BQBucketData& out) {
     }
     return true;
 }
-
-// 新增：大桶 BQ 图数据结构与加载器
-struct BQGraphData {
-    size_t padded_dim{0};
-    size_t bits{4};
-    size_t num_points{0};
-    size_t degree{0};
-    std::vector<uint8_t> bin_codes;   // packed codes
-    std::vector<float> f_add;
-    std::vector<float> f_rescale;
-    std::vector<uint8_t> ex_blob;     // 可选
-    std::vector<uint32_t> adj;        // 邻接表（按行存储，num_points * degree）
-};
 
 static bool load_bq_graph(uint32_t bucket_id, BQGraphData& g) {
     std::string path = resolve_read_path_local("bucket_" + std::to_string(bucket_id) + "_bqgraph.bin");
@@ -279,7 +367,6 @@ static bool load_bq_graph(uint32_t bucket_id, BQGraphData& g) {
     in.read(reinterpret_cast<char*>(g.bin_codes.data()), code_bytes);
     in.read(reinterpret_cast<char*>(g.f_add.data()), sizeof(float) * g.num_points);
     in.read(reinterpret_cast<char*>(g.f_rescale.data()), sizeof(float) * g.num_points);
-    // ex_data（若存在则剩余区间为 ex_blob + 邻接表）
     if (g.bits > 1) {
         size_t ex_stride = rabitqlib::ExDataMap<float>::data_bytes(g.padded_dim, g.bits - 1);
         g.ex_blob.resize(ex_stride * g.num_points);
@@ -290,18 +377,15 @@ static bool load_bq_graph(uint32_t bucket_id, BQGraphData& g) {
     return true;
 }
 
-// 使用 BQ 距离在图上进行近邻搜索（简化版：贪心+候选队列）
-static void bq_graph_search(
-    uint32_t bucket_id,
+// 使用 BQ 距离在图上进行近邻搜索（简化版：贪心+候选队列），基于已加载图
+static void bq_graph_search_loaded(
+    const BQGraphData& G,
     const std::vector<float>& query,
     size_t orig_dim,
     size_t k,
     std::vector<std::pair<float, uint32_t>>& out_local_cand
 ) {
-    BQGraphData G;
-    if (!load_bq_graph(bucket_id, G) || G.num_points == 0) return;
-
-    // 构造查询对象
+    if (G.num_points == 0) return;
     std::vector<float> q_pad(G.padded_dim, 0.0f);
     std::copy(query.begin(), query.end(), q_pad.begin());
     size_t ex_bits = G.bits > 1 ? (G.bits - 1) : 0;
@@ -332,7 +416,6 @@ static void bq_graph_search(
         return dist_est;
     };
 
-    // 读取环境变量：efSearch 与 seeds 数量
     size_t ef_search = 128;
     if (const char* env = std::getenv("BQ_EF_SEARCH")) {
         try { ef_search = std::max<size_t>(1, std::stoul(env)); } catch (...) {}
@@ -342,7 +425,6 @@ static void bq_graph_search(
         try { num_seeds = std::max<size_t>(1, std::stoul(env)); } catch (...) {}
     }
 
-    // 多种子入口：等间隔采样
     std::vector<uint32_t> entry_points;
     if (G.num_points > 0) {
         num_seeds = std::min(num_seeds, G.num_points);
@@ -358,7 +440,7 @@ static void bq_graph_search(
     }
 
     std::vector<char> visited(G.num_points, 0);
-    using Node = std::pair<float, uint32_t>; // (dist, id)
+    using Node = std::pair<float, uint32_t>;
     auto cmp = [](const Node& a, const Node& b){ return a.first > b.first; };
     std::priority_queue<Node, std::vector<Node>, decltype(cmp)> cand_queue(cmp);
 
@@ -381,7 +463,6 @@ static void bq_graph_search(
         ++expanded;
         best.emplace_back(cd, u);
 
-        // 扩展邻居
         for (size_t t = 0; t < G.degree; ++t) {
             uint32_t v = G.adj[u * G.degree + t];
             if (v >= G.num_points || visited[v]) continue;
@@ -390,7 +471,6 @@ static void bq_graph_search(
         }
     }
 
-    // 选前 k 个
     size_t want = std::min(k, best.size());
     if (best.size() > want) {
         std::nth_element(best.begin(), best.begin() + want, best.end());
@@ -411,6 +491,19 @@ QueryResult search_two_stage(
     bool use_bq,
     size_t bq_graph_threshold
 ) {
+    // 懒加载全局 BQ 缓存
+    static std::once_flag s_once;
+    static std::unique_ptr<BQBucketCache> s_bucket_cache;
+    static std::unique_ptr<BQGraphCache>  s_graph_cache;
+    std::call_once(s_once, [](){
+        size_t bucket_mb = 256, graph_mb = 256;
+        if (const char* env = std::getenv("BQ_BUCKET_CACHE_MB")) { try { bucket_mb = std::stoul(env); } catch (...) {} }
+        if (const char* env = std::getenv("BQ_GRAPH_CACHE_MB"))  { try { graph_mb  = std::stoul(env); } catch (...) {} }
+        s_bucket_cache = std::make_unique<BQBucketCache>(bucket_mb * 1024ULL * 1024ULL);
+        s_graph_cache  = std::make_unique<BQGraphCache>( graph_mb * 1024ULL * 1024ULL);
+        std::cout << "[BQ Cache] bucket=" << bucket_mb << "MB, graph=" << graph_mb << "MB" << std::endl;
+    });
+
     // 第一步：在medoid_vamana查找最近的bucket_id
     std::vector<uint32_t> nearest_bucket_ids(f);
     medoid_index.search(query.data(), f, f, nearest_bucket_ids.data(), nullptr);
@@ -419,9 +512,8 @@ QueryResult search_two_stage(
     std::set<uint32_t> visited_ids;
 
     if (!use_bq) {
-        // 原始raw逻辑：使用每桶Vamana子图
         for (uint32_t bucket_id : nearest_bucket_ids) {
-            auto bucket_index = index_cache.get_non_blocking(bucket_id);  // 使用非阻塞方法
+            auto bucket_index = index_cache.get_non_blocking(bucket_id);
             if (bucket_index) {
                 size_t actual_k = std::min(k, bucket_index->get_num_points());
                 if (actual_k == 0) continue;
@@ -442,40 +534,58 @@ QueryResult search_two_stage(
             }
         }
     } else {
-        // BQ 模式：若桶内向量数 >= 阈值，优先使用图搜（需要该桶已构图）；否则使用 fastscan
         for (uint32_t bucket_id : nearest_bucket_ids) {
             const size_t bucket_size = buckets[bucket_id].size();
             if (bucket_size >= bq_graph_threshold) {
-                // 优先使用 BQ 图搜索；若 bqgraph 缺失则回退 fastscan
-                std::vector<std::pair<float, uint32_t>> local_cand;
-                bq_graph_search(bucket_id, query, dim, k, local_cand);
-                if (!local_cand.empty()) {
-                    for (auto& p : local_cand) {
-                        uint32_t local_idx = p.second;
-                        if (local_idx < buckets[bucket_id].size()) {
-                            uint32_t global_id = buckets[bucket_id][local_idx];
-                            if (visited_ids.insert(global_id).second) {
-                                candidates.emplace_back(p.first, global_id);
+                std::shared_ptr<const BQGraphData> gp;
+                if (s_graph_cache) {
+                    gp = s_graph_cache->get_or_load(bucket_id, [&](BQGraphData& dst){ return load_bq_graph(bucket_id, dst); });
+                }
+                BQGraphData localG;
+                const BQGraphData* G = nullptr;
+                if (gp) {
+                    G = gp.get();
+                } else {
+                    if (load_bq_graph(bucket_id, localG)) G = &localG; else G = nullptr;
+                }
+                if (G && G->num_points > 0) {
+                    std::vector<std::pair<float, uint32_t>> local_cand;
+                    bq_graph_search_loaded(*G, query, dim, k, local_cand);
+                    if (!local_cand.empty()) {
+                        for (auto& p : local_cand) {
+                            uint32_t local_idx = p.second;
+                            if (local_idx < buckets[bucket_id].size()) {
+                                uint32_t global_id = buckets[bucket_id][local_idx];
+                                if (visited_ids.insert(global_id).second) {
+                                    candidates.emplace_back(p.first, global_id);
+                                }
                             }
                         }
+                        continue;
                     }
-                    continue; // 已用 bqgraph
                 }
-                // 若未加载到 bqgraph，回退 fastscan
             }
 
-            // fastscan 路径（小桶或 bqgraph 缺失）
-            BQBucketData bd;
-            if (!load_bq_bucket(bucket_id, bd) || bd.num_points == 0) continue;
-            size_t code_cols = bd.padded_dim / 8;
-            size_t num = bd.num_points;
+            std::shared_ptr<const BQBucketData> bp;
+            if (s_bucket_cache) {
+                bp = s_bucket_cache->get_or_load(bucket_id, [&](BQBucketData& dst){ return load_bq_bucket(bucket_id, dst); });
+            }
+            BQBucketData localB;
+            const BQBucketData* bd = nullptr;
+            if (bp) { bd = bp.get(); }
+            else {
+                if (load_bq_bucket(bucket_id, localB)) bd = &localB; else bd = nullptr;
+            }
+            if (!bd || bd->num_points == 0) continue;
 
-            // 准备查询：pad 到 padded_dim
-            std::vector<float> q_pad(bd.padded_dim, 0.0f);
+            size_t code_cols = bd->padded_dim / 8;
+            size_t num = bd->num_points;
+
+            std::vector<float> q_pad(bd->padded_dim, 0.0f);
             std::copy(query.begin(), query.end(), q_pad.begin());
 
-            size_t ex_bits = bd.bits > 1 ? (bd.bits - 1) : 0;
-            rabitqlib::SplitBatchQuery<float> qobj(q_pad.data(), bd.padded_dim, ex_bits, rabitqlib::METRIC_L2, false);
+            size_t ex_bits = bd->bits > 1 ? (bd->bits - 1) : 0;
+            rabitqlib::SplitBatchQuery<float> qobj(q_pad.data(), bd->padded_dim, ex_bits, rabitqlib::METRIC_L2, false);
             float qnorm2 = 0.0f; for (size_t d = 0; d < dim; ++d) qnorm2 += query[d] * query[d];
             float qnorm = std::sqrt(qnorm2);
             qobj.set_g_add(qnorm, 0.0f);
@@ -488,25 +598,24 @@ QueryResult search_two_stage(
             size_t num_rd = (num + 31) & ~31ULL;
             size_t batches = num_rd / 32;
             for (size_t b = 0; b < batches; ++b) {
-                const uint8_t* codes = bd.bin_codes.data() + b * (code_cols * 32);
-                rabitqlib::fastscan::accumulate(codes, qobj.lut(), accu.data(), bd.padded_dim);
+                const uint8_t* codes = bd->bin_codes.data() + b * (code_cols * 32);
+                rabitqlib::fastscan::accumulate(codes, qobj.lut(), accu.data(), bd->padded_dim);
 
                 size_t base = b * 32;
                 size_t batch = std::min<size_t>(32, num - base);
                 for (size_t i = 0; i < batch; ++i) {
                     size_t idx = base + i;
                     float ip_est = qobj.delta() * static_cast<float>(accu[i]) + qobj.sum_vl_lut();
-                    float dist_est = bd.f_add[idx] + qobj.g_add() + bd.f_rescale[idx] * (ip_est + qobj.k1xsumq());
+                    float dist_est = bd->f_add[idx] + qobj.g_add() + bd->f_rescale[idx] * (ip_est + qobj.k1xsumq());
 
-                    // ex_bits boosting（如果存在 ex_data）
-                    if (bd.bits > 1 && !bd.ex_blob.empty()) {
-                        size_t ex_bits2 = bd.bits - 1;
-                        size_t ex_stride = rabitqlib::ExDataMap<float>::data_bytes(bd.padded_dim, ex_bits2);
-                        const char* ex_ptr = reinterpret_cast<const char*>(bd.ex_blob.data()) + (idx * ex_stride);
+                    if (bd->bits > 1 && !bd->ex_blob.empty()) {
+                        size_t ex_bits2 = bd->bits - 1;
+                        size_t ex_stride = rabitqlib::ExDataMap<float>::data_bytes(bd->padded_dim, ex_bits2);
+                        const char* ex_ptr = reinterpret_cast<const char*>(bd->ex_blob.data()) + (idx * ex_stride);
                         auto ip_func = rabitqlib::select_excode_ipfunc(ex_bits2);
-                        rabitqlib::ConstExDataMap<float> ex_map(ex_ptr, bd.padded_dim, ex_bits2);
+                        rabitqlib::ConstExDataMap<float> ex_map(ex_ptr, bd->padded_dim, ex_bits2);
                         float ex_dist = ex_map.f_add_ex() + qobj.g_add() + (ex_map.f_rescale_ex() *
-                            (static_cast<float>(1 << ex_bits2) * (ip_est) + ip_func(q_pad.data(), ex_map.ex_code(), bd.padded_dim) + qobj.kbxsumq()));
+                            (static_cast<float>(1 << ex_bits2) * (ip_est) + ip_func(q_pad.data(), ex_map.ex_code(), bd->padded_dim) + qobj.kbxsumq()));
                         dist_est = ex_dist;
                     }
 
@@ -530,16 +639,13 @@ QueryResult search_two_stage(
             }
         }
     }
-    
-    
+
     std::sort(candidates.begin(), candidates.end());
 
-    // 若提供 BASE_FBIN，则对所有 candidates 用真距复排（mmap 方式），避免额外内存占用
     {
         const char* base_fbin_env = std::getenv("BASE_FBIN");
         if (base_fbin_env && base_fbin_env[0] != '\0' && !candidates.empty() && top_k > 0) {
             std::string base_fbin_path(base_fbin_env);
-            // 默认对齐 DiskANN：优先使用 O_DIRECT；若显式设置 RERANK_O_DIRECT=0 则关闭
             bool force_odirect = true;
             if (const char* env_od = std::getenv("RERANK_O_DIRECT")) {
                 std::string v(env_od);
@@ -548,9 +654,7 @@ QueryResult search_two_stage(
             int flags = O_RDONLY | (force_odirect ? O_DIRECT : 0);
             int fd = ::open(base_fbin_path.c_str(), flags);
             if (fd >= 0) {
-                // 优先使用 pread 做通用真距复排（尽量不依赖页缓存）。
                 do {
-                    // header 用普通方式读取，避免 O_DIRECT 对齐限制
                     uint32_t hdr_u32[2] = {0, 0};
                     int fd_meta = ::open(base_fbin_path.c_str(), O_RDONLY);
                     if (fd_meta < 0) break;
@@ -568,9 +672,7 @@ QueryResult search_two_stage(
                     std::vector<float> buf(base_dim);
                     const bool odirect_on = force_odirect;
                     const size_t vec_bytes = sizeof(float) * base_dim;
-                    // 参考 DiskANN：对齐到 512 字节而非页面大小
                     const size_t bs = 512ULL;
-                    // 统一的对齐读缓冲（最大需要 vec_bytes + bs 向上取整）
                     size_t aligned_cap = ((vec_bytes + bs) + (bs - 1)) & ~(bs - 1);
                     void* od_buf = nullptr;
                     if (odirect_on) {
@@ -592,13 +694,11 @@ QueryResult search_two_stage(
                         }
                     };
                     size_t skipped_oob = 0, short_reads = 0;
-                    size_t success_reads = 0;
                     for (size_t i = 0; i < candidates.size(); ++i) {
                         uint32_t gid = candidates[i].second;
                         if (gid >= base_num) { skipped_oob++; continue; }
                         const off_t off = header_bytes + static_cast<off_t>(sizeof(float)) * static_cast<off_t>(gid) * static_cast<off_t>(base_dim);
                         if (!read_vec_od(fd, off)) { short_reads++; continue; }
-                        success_reads++;
                         float dist = 0.0f;
                         for (size_t d = 0; d < base_dim; ++d) {
                             float diff = buf[d] - query[d];
@@ -623,39 +723,39 @@ QueryResult search_two_stage(
                         ::close(fd);
                         return final_results_r;
                     }
-                    // 若 O_DIRECT 路径未能成功读取，则回退为普通 pread（不 mmap）
                     if (odirect_on) {
                         std::cout << "[rerank] O_DIRECT path yielded no pairs, fallback to plain pread" << std::endl;
                         int fd_plain = ::open(base_fbin_path.c_str(), O_RDONLY);
                         if (fd_plain >= 0) {
-                            rerank_pairs.clear();
-                            skipped_oob = 0; short_reads = 0;
+                            std::vector<std::pair<float, uint32_t>> rerank_pairs2;
+                            rerank_pairs2.reserve(candidates.size());
+                            size_t skipped2 = 0, short2 = 0;
                             for (size_t i = 0; i < candidates.size(); ++i) {
                                 uint32_t gid = candidates[i].second;
-                                if (gid >= base_num) { skipped_oob++; continue; }
+                                if (gid >= base_num) { skipped2++; continue; }
                                 const off_t off = header_bytes + static_cast<off_t>(sizeof(float)) * static_cast<off_t>(gid) * static_cast<off_t>(base_dim);
                                 ssize_t br = ::pread(fd_plain, reinterpret_cast<char*>(buf.data()), vec_bytes, off);
-                                if (br != static_cast<ssize_t>(vec_bytes)) { short_reads++; continue; }
+                                if (br != static_cast<ssize_t>(vec_bytes)) { short2++; continue; }
                                 float dist = 0.0f;
                                 for (size_t d = 0; d < base_dim; ++d) {
                                     float diff = buf[d] - query[d];
                                     dist += diff * diff;
                                 }
-                                rerank_pairs.emplace_back(dist, gid);
+                                rerank_pairs2.emplace_back(dist, gid);
                             }
                             ::close(fd_plain);
-                            if (!rerank_pairs.empty()) {
-                                std::sort(rerank_pairs.begin(), rerank_pairs.end());
+                            if (!rerank_pairs2.empty()) {
+                                std::sort(rerank_pairs2.begin(), rerank_pairs2.end());
                                 QueryResult final_results_r;
-                                final_results_r.ids.reserve(std::min(top_k, rerank_pairs.size()));
-                                final_results_r.distances.reserve(std::min(top_k, rerank_pairs.size()));
-                                for (size_t i = 0; i < std::min(top_k, rerank_pairs.size()); ++i) {
-                                    final_results_r.distances.push_back(rerank_pairs[i].first);
-                                    final_results_r.ids.push_back(rerank_pairs[i].second);
+                                final_results_r.ids.reserve(std::min(top_k, rerank_pairs2.size()));
+                                final_results_r.distances.reserve(std::min(top_k, rerank_pairs2.size()));
+                                for (size_t i = 0; i < std::min(top_k, rerank_pairs2.size()); ++i) {
+                                    final_results_r.distances.push_back(rerank_pairs2[i].first);
+                                    final_results_r.ids.push_back(rerank_pairs2[i].second);
                                 }
-                                if (skipped_oob > 0 || short_reads > 0) {
-                                    std::cout << "[rerank] pread(plain): skipped_oob=" << skipped_oob
-                                              << ", short_reads=" << short_reads << std::endl;
+                                if (skipped2 > 0 || short2 > 0) {
+                                    std::cout << "[rerank] pread(plain): skipped_oob=" << skipped2
+                                              << ", short_reads=" << short2 << std::endl;
                                 }
                                 ::close(fd);
                                 return final_results_r;
@@ -664,7 +764,6 @@ QueryResult search_two_stage(
                     }
                 } while(false);
 
-                // 是否允许 mmap 回退：仅在 RERANK_USE_MMAP=1 时启用
                 bool allow_mmap = false;
                 if (const char* env_mm = std::getenv("RERANK_USE_MMAP")) {
                     std::string v(env_mm);

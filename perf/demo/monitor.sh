@@ -30,6 +30,10 @@ BQ_EF_SEARCH="${BQ_EF_SEARCH:-128}"             # bqgraph 的 ef 宽度
 BQ_SEEDS="${BQ_SEEDS:-8}"                       # bqgraph 的入口点数
 # 是否允许 mmap 回退（默认关闭，保持与 DiskANN fastscan
 RERANK_USE_MMAP="${RERANK_USE_MMAP:-0}"
+
+# 新增：BQ 缓存内存预算（MB）
+BQ_BUCKET_CACHE_MB="${BQ_BUCKET_CACHE_MB:-64}"
+BQ_GRAPH_CACHE_MB="${BQ_GRAPH_CACHE_MB:-300}"
 # =====================================
 
 # 基本校验
@@ -57,6 +61,8 @@ cat <<EOF
 [demo search] BQ_GRAPH_THRESHOLD : $BQ_GRAPH_THRESHOLD
 [demo search] BQ_EF_SEARCH       : $BQ_EF_SEARCH
 [demo search] BQ_SEEDS           : $BQ_SEEDS
+[demo search] BQ_BUCKET_CACHE_MB : $BQ_BUCKET_CACHE_MB
+[demo search] BQ_GRAPH_CACHE_MB  : $BQ_GRAPH_CACHE_MB
 EOF
 
 # 运行（程序内部会在 BQ 模式自动禁用 Vamana LRU Cache）
@@ -67,6 +73,8 @@ BQ_SEEDS="$BQ_SEEDS" \
 BASE_FBIN="$BASE_FBIN" \
 RERANK_O_DIRECT="$RERANK_O_DIRECT" \
 RERANK_USE_MMAP="$RERANK_USE_MMAP" \
+BQ_BUCKET_CACHE_MB="$BQ_BUCKET_CACHE_MB" \
+BQ_GRAPH_CACHE_MB="$BQ_GRAPH_CACHE_MB" \
 "$DEMO_BIN" "$QUERY_FBIN" "$GROUNDTRUTH_IVECS" &
 
 # 获取刚启动的子进程 PID

@@ -272,8 +272,8 @@ void search_mode(const std::string& query_path, const std::string& gt_path) {
     std::cout << "\n--- Running in SEARCH mode ---" << std::endl;
 
     // --- Parameters ---
-    const int f = 6; // Number of buckets to search
-    const int k = 50; // Number of neighbors to retrieve per bucket
+    const int f = 4; // Number of buckets to search
+    const int k = 100; // Number of neighbors to retrieve per bucket
     const int num_threads = std::thread::hardware_concurrency();
 
     // --- Load metadata ---
@@ -299,7 +299,7 @@ void search_mode(const std::string& query_path, const std::string& gt_path) {
     std::cout << "Read metadata: average_buckets_per_vector=" << average_buckets_per_vector << std::endl;
     std::cout << "Read metadata: use_bq=" << use_bq_flag << ", bits=" << bq_bits << std::endl;
 
-    // 读取 BQ_GRAPH_THRESHOLD 环境变量，默认 1000
+    // 读取 BQ_GRAPH_THRESHOLD 环境变量，默认 5000
     size_t bq_graph_threshold = 5000;
     if (const char* env_thr = std::getenv("BQ_GRAPH_THRESHOLD")) {
         try { bq_graph_threshold = std::stoul(env_thr); } catch (...) {}
