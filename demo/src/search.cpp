@@ -531,6 +531,7 @@ QueryResult search_two_stage(
                     }
                 }
                 std::cout << "[BQ Cache] prewarmed top " << topN << " buckets by size" << std::endl;
+
             }
             s_prewarmed.store(true);
         }
@@ -704,41 +705,118 @@ QueryResult search_two_stage(
                     std::vector<float> buf(base_dim);
                     const bool odirect_on = force_odirect;
                     const size_t vec_bytes = sizeof(float) * base_dim;
-                    const size_t bs = 512ULL;
-                    size_t aligned_cap = ((vec_bytes + bs) + (bs - 1)) & ~(bs - 1);
-                    void* od_buf = nullptr;
+
+                    auto read_env_size_t = [](const char* name, size_t def_val) -> size_t {
+                        const char* s = std::getenv(name);
+                        if (s == nullptr) return def_val;
+                        char* endp = nullptr;
+                        unsigned long long v = std::strtoull(s, &endp, 10);
+                        if (endp == s || v == 0ULL) return def_val;
+                        return static_cast<size_t>(v);
+                    };
+
+                    size_t bs = read_env_size_t("RERANK_ALIGN_BS", 4096);
+                    if (bs == 0 || (bs % 512ULL) != 0) bs = 4096; // 至少 512 对齐，优选 4K
+                    const size_t batch_vecs_limit = read_env_size_t("RERANK_BATCH_VECS", 128);
+                    const size_t batch_mb = read_env_size_t("RERANK_BATCH_MB", 8);
+                    const size_t batch_bytes_limit = batch_mb * 1024ULL * 1024ULL;
+                    const size_t gap_gids = read_env_size_t("RERANK_GAP_GIDS", 8);
+
+                    // 单向量 O_DIRECT 读取的兜底缓冲
+                    size_t aligned_cap_sv = ((vec_bytes + bs) + (bs - 1)) & ~(bs - 1);
+                    void* sv_buf = nullptr;
                     if (odirect_on) {
-                        if (posix_memalign(&od_buf, bs, aligned_cap) != 0) od_buf = nullptr;
+                        if (posix_memalign(&sv_buf, bs, aligned_cap_sv) != 0) sv_buf = nullptr;
                     }
                     auto read_vec_od = [&](int fd_r, off_t off)->bool{
-                        if (!odirect_on || od_buf == nullptr) {
+                        if (!odirect_on || sv_buf == nullptr) {
                             ssize_t br = ::pread(fd_r, reinterpret_cast<char*>(buf.data()), vec_bytes, off);
                             return br == static_cast<ssize_t>(vec_bytes);
                         } else {
                             off_t aligned_start = (off / static_cast<off_t>(bs)) * static_cast<off_t>(bs);
                             size_t inner = static_cast<size_t>(off - aligned_start);
                             size_t aligned_len = (inner + vec_bytes + (bs - 1)) & ~(bs - 1);
-                            ssize_t br = ::pread(fd_r, od_buf, aligned_len, aligned_start);
+                            ssize_t br = ::pread(fd_r, sv_buf, aligned_len, aligned_start);
                             if (br != static_cast<ssize_t>(aligned_len)) return false;
-                            const char* p = static_cast<const char*>(od_buf) + inner;
+                            const char* p = static_cast<const char*>(sv_buf) + inner;
                             std::memcpy(buf.data(), p, vec_bytes);
                             return true;
                         }
                     };
-                    size_t skipped_oob = 0, short_reads = 0;
-                    for (size_t i = 0; i < candidates.size(); ++i) {
-                        uint32_t gid = candidates[i].second;
-                        if (gid >= base_num) { skipped_oob++; continue; }
-                        const off_t off = header_bytes + static_cast<off_t>(sizeof(float)) * static_cast<off_t>(gid) * static_cast<off_t>(base_dim);
-                        if (!read_vec_od(fd, off)) { short_reads++; continue; }
-                        float dist = 0.0f;
-                        for (size_t d = 0; d < base_dim; ++d) {
-                            float diff = buf[d] - query[d];
-                            dist += diff * diff;
-                        }
-                        rerank_pairs.emplace_back(dist, gid);
+
+                    // 收集有效 gid 并升序，便于顺序合并大块读取
+                    std::vector<uint32_t> gids;
+                    gids.reserve(candidates.size());
+                    for (const auto& c : candidates) {
+                        uint32_t gid = c.second;
+                        if (gid < base_num) gids.push_back(gid);
                     }
-                    if (od_buf) { free(od_buf); }
+                    if (!gids.empty()) {
+                        std::sort(gids.begin(), gids.end());
+                        gids.erase(std::unique(gids.begin(), gids.end()), gids.end());
+                    }
+
+                    size_t skipped_oob = 0, short_reads = 0;
+                    // 分段合并：在 gap_gids、batch_vecs_limit、batch_bytes_limit 三个约束下，合并近邻 gid 为顺序段
+                    for (size_t sidx = 0; sidx < gids.size();) {
+                        uint32_t first_gid = gids[sidx];
+                        uint32_t last_gid = first_gid;
+                        size_t seg_last_index = sidx;
+                        while (seg_last_index + 1 < gids.size()) {
+                            uint32_t next_gid = gids[seg_last_index + 1];
+                            if (static_cast<size_t>(next_gid - last_gid) > gap_gids) break;
+                            size_t proposed_vecs = static_cast<size_t>(next_gid - first_gid + 1);
+                            size_t proposed_bytes = proposed_vecs * vec_bytes;
+                            if (proposed_vecs > batch_vecs_limit || proposed_bytes > batch_bytes_limit) break;
+                            last_gid = next_gid;
+                            seg_last_index++;
+                        }
+
+                        size_t range_vecs = static_cast<size_t>(last_gid - first_gid + 1);
+                        const off_t range_start_off = header_bytes + static_cast<off_t>(sizeof(float)) * static_cast<off_t>(first_gid) * static_cast<off_t>(base_dim);
+                        off_t aligned_start = (range_start_off / static_cast<off_t>(bs)) * static_cast<off_t>(bs);
+                        size_t inner = static_cast<size_t>(range_start_off - aligned_start);
+                        size_t aligned_len = (inner + range_vecs * vec_bytes + (bs - 1)) & ~(bs - 1);
+
+                        void* big_buf = nullptr;
+                        bool segment_ok = false;
+                        if (posix_memalign(&big_buf, bs, aligned_len) == 0 && big_buf != nullptr) {
+                            ssize_t br = ::pread(fd, big_buf, aligned_len, aligned_start);
+                            if (br == static_cast<ssize_t>(aligned_len)) {
+                                const char* base_ptr = static_cast<const char*>(big_buf) + inner;
+                                for (size_t t = sidx; t <= seg_last_index; ++t) {
+                                    uint32_t gid = gids[t];
+                                    size_t rel = static_cast<size_t>(gid - first_gid);
+                                    const float* vptr = reinterpret_cast<const float*>(base_ptr + rel * vec_bytes);
+                                    float dist = 0.0f;
+                                    for (size_t d = 0; d < base_dim; ++d) {
+                                        float diff = vptr[d] - query[d];
+                                        dist += diff * diff;
+                                    }
+                                    rerank_pairs.emplace_back(dist, gid);
+                                }
+                                segment_ok = true;
+                            }
+                        }
+                        if (big_buf) free(big_buf);
+
+                        if (!segment_ok) {
+                            // 兜底：该段退回逐向量读取
+                            for (size_t t = sidx; t <= seg_last_index; ++t) {
+                                uint32_t gid = gids[t];
+                                const off_t off = header_bytes + static_cast<off_t>(sizeof(float)) * static_cast<off_t>(gid) * static_cast<off_t>(base_dim);
+                                if (!read_vec_od(fd, off)) { short_reads++; continue; }
+                                float dist = 0.0f;
+                                for (size_t d = 0; d < base_dim; ++d) {
+                                    float diff = buf[d] - query[d];
+                                    dist += diff * diff;
+                                }
+                                rerank_pairs.emplace_back(dist, gid);
+                            }
+                        }
+                        sidx = seg_last_index + 1;
+                    }
+                    if (sv_buf) { free(sv_buf); }
                     if (!rerank_pairs.empty()) {
                         std::sort(rerank_pairs.begin(), rerank_pairs.end());
                         QueryResult final_results_r;

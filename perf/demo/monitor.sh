@@ -4,7 +4,7 @@ set -euo pipefail
 # =====================================
 # Demo 查询脚本（直接在下方“用户配置区”修改配置）
 # 运行：
-#   ./search.sh
+#   ./monitor.sh
 # =====================================
 
 # ===== 用户配置区（请按需修改） =====
@@ -36,6 +36,12 @@ BQ_BUCKET_CACHE_MB="${BQ_BUCKET_CACHE_MB:-64}"
 BQ_GRAPH_CACHE_MB="${BQ_GRAPH_CACHE_MB:-512}"
 # 新增：预热前 N 个最大桶（按桶大小排序，0 表示不预热）
 BQ_PREWARM_TOP="${BQ_PREWARM_TOP:-0}"
+
+# 新增：复排 O_DIRECT 读优化参数（仅磁盘读，不启用 mmap）
+RERANK_ALIGN_BS="${RERANK_ALIGN_BS:-4096}"       # 对齐粒度（字节），建议 4096；自动兼容 >=512
+RERANK_BATCH_VECS="${RERANK_BATCH_VECS:-128}"    # 每段最大向量数
+RERANK_BATCH_MB="${RERANK_BATCH_MB:-8}"          # 每段最大读取字节数（MB）
+RERANK_GAP_GIDS="${RERANK_GAP_GIDS:-8}"          # 合并段允许的 gid 间隙（行数）
 # =====================================
 
 # 基本校验
@@ -66,9 +72,16 @@ cat <<EOF
 [demo search] BQ_BUCKET_CACHE_MB : $BQ_BUCKET_CACHE_MB
 [demo search] BQ_GRAPH_CACHE_MB  : $BQ_GRAPH_CACHE_MB
 [demo search] BQ_PREWARM_TOP     : $BQ_PREWARM_TOP
+[demo search] RERANK_ALIGN_BS    : $RERANK_ALIGN_BS
+[demo search] RERANK_BATCH_VECS  : $RERANK_BATCH_VECS
+[demo search] RERANK_BATCH_MB    : $RERANK_BATCH_MB
+[demo search] RERANK_GAP_GIDS    : $RERANK_GAP_GIDS
 EOF
 
-# 运行（程序内部会在 BQ 模式自动禁用 Vamana LRU Cache）
+# 确保绘图不阻塞（monitor_process.py 内已支持 PLOT_SHOW 环境开关）
+export PLOT_SHOW=${PLOT_SHOW:-0}
+
+# 启动被监控进程（后台），随后对其 PID 做固定时长监控
 DEMO_INPUT_DIR="$INDEX_DIR" \
 BQ_GRAPH_THRESHOLD="$BQ_GRAPH_THRESHOLD" \
 BQ_EF_SEARCH="$BQ_EF_SEARCH" \
@@ -79,17 +92,22 @@ RERANK_USE_MMAP="$RERANK_USE_MMAP" \
 BQ_BUCKET_CACHE_MB="$BQ_BUCKET_CACHE_MB" \
 BQ_GRAPH_CACHE_MB="$BQ_GRAPH_CACHE_MB" \
 BQ_PREWARM_TOP="$BQ_PREWARM_TOP" \
+RERANK_ALIGN_BS="$RERANK_ALIGN_BS" \
+RERANK_BATCH_VECS="$RERANK_BATCH_VECS" \
+RERANK_BATCH_MB="$RERANK_BATCH_MB" \
+RERANK_GAP_GIDS="$RERANK_GAP_GIDS" \
 "$DEMO_BIN" "$QUERY_FBIN" "$GROUNDTRUTH_IVECS" &
 
-# 获取刚启动的子进程 PID
 PID=$!
 
-echo "✅ 启动程序: ../demo/scripts/search.sh"
-echo "   Demo 搜索过程监控"
-echo "   PID: $PID"
+echo "✅ 启动 demo_test，PID: $PID"
 
-# 使用 Python 监控脚本监控该 PID（假设监控 10 分钟足够）
-python monitor_process.py $PID -d 600 -i 0.1 -o demo/search_monitor.csv
+# 监控 600 秒（可通过 DURATION 与 INTERVAL 自定义）
+DURATION=${DURATION:-600}
+INTERVAL=${INTERVAL:-0.1}
+python "$REPO_ROOT/perf/monitor_process.py" $PID -d "$DURATION" -i "$INTERVAL" -o "$SCRIPT_DIR/search_monitor.csv"
 
-# 等待进程结束（可选）
+# 等待被监控进程退出（以确保 CSV/PNG 完整）
 wait $PID
+
+echo "✅ 监控结束，输出: $SCRIPT_DIR/search_monitor.csv 和对应 PNG"

@@ -684,6 +684,23 @@ ls demo/demo_test
     DiskANN/demo/scripts/search.sh
     ```
 
+- 性能监控脚本：`DiskANN/perf/demo/monitor.sh`
+  - 作用：一键运行查询并采集 CPU/RSS/IO，输出 CSV/PNG；已内置“真距复排磁盘读优化”的缺省参数
+  - 关键参数（可通过环境变量覆盖）：
+    - `RERANK_O_DIRECT`（默认 1，开启 O_DIRECT）
+    - `RERANK_USE_MMAP`（默认 0，禁用 mmap）
+    - `RERANK_ALIGN_BS`（默认 4096，对齐字节，自动兼容 ≥512）
+    - `RERANK_BATCH_VECS`（默认 128，段内最大向量数）
+    - `RERANK_BATCH_MB`（默认 8，段内最大读取 MB）
+    - `RERANK_GAP_GIDS`（默认 8，允许合并段的 gid 间隙）
+  - 运行：
+    ```bash
+    /home/danbai.wq/DiskANN/perf/demo/monitor.sh
+    # 或更激进的磁盘读合并参数：
+    RERANK_BATCH_VECS=256 RERANK_BATCH_MB=16 RERANK_GAP_GIDS=16 \
+      /home/danbai.wq/DiskANN/perf/demo/monitor.sh
+    ```
+
 说明：
 - 脚本会通过程序提供的 `DEMO_OUTPUT_DIR/DEMO_INPUT_DIR` 将产物定向到自定义目录，便于分析磁盘占用。
 - BQ 模式下，查询阶段会自动禁用 Vamana LRU Cache（节省约 1GB 内存）。
@@ -878,12 +895,47 @@ BQ_GRAPH_THRESHOLD=2000 BQ_EF_SEARCH=128 BQ_SEEDS=8 ./demo/demo_test /path/to/qu
 # 修改脚本顶部 BASE_FBIN 指向你的 base.fbin
 /home/danbai.wq/DiskANN/demo/scripts/search.sh
 # 或带监控
-/home/danbai.wq/DiskANN/perf/demo_search_monitor.sh
+/home/danbai.wq/DiskANN/perf/demo/monitor.sh
 ```
 
 - 效果
   - f 增大不会再因跨桶估计距混排而降低召回；通常召回更稳定或提升。
   - 在大数据/冷数据场景下，`pread(O_DIRECT)` 复排更通用，且不引入额外内存开销。 
+
+#### 仅磁盘读优化（O_DIRECT 批量顺序读，禁用 mmap）
+为降低复排阶段的随机 I/O 抖动、提升 CPU 利用率，demo 在 O_DIRECT 路径实现了“按 gid 升序 + 段合并 + 单次对齐大块 pread”的纯磁盘读优化（不启用 mmap）：
+
+- 原理
+  - 将候选的全局 ID（gid）按升序排序，基于 `.fbin` 行顺序布局将“随机小读”转化为“单调递增偏移的近顺序读”。
+  - 以“向量大小”为步长，合并“连续/近连续”的 gid 为顺序段；对每段使用一次对齐的大块 `pread`（`posix_memalign` 获取对齐缓冲），在内存中按指针偏移直接计算该段内多条向量距离。
+  - 若某段读失败或未对齐，自动回退为该段逐向量 `pread`（正确性不变）。
+
+- 环境变量（已在 `perf/demo/monitor.sh` 内置默认值，可按需覆盖）
+  - `RERANK_O_DIRECT`：是否启用 O_DIRECT（默认 `1`）
+  - `RERANK_USE_MMAP`：是否启用 mmap 路径（默认 `0`，建议禁用）
+  - `RERANK_ALIGN_BS`：对齐字节（默认 `4096`，自动兼容 `>=512`）
+  - `RERANK_BATCH_VECS`：每段最大向量数（默认 `128`）
+  - `RERANK_BATCH_MB`：每段最大读取字节数（MB）（默认 `8`）
+  - `RERANK_GAP_GIDS`：合并段允许的 gid 间隙（行数，默认 `8`）
+
+- 一键体验
+```bash
+# 直接运行监控脚本，使用默认的纯磁盘读优化参数
+/home/danbai.wq/DiskANN/perf/demo/monitor.sh
+
+# 覆盖为更激进的读合并参数（适用于 NVMe）
+RERANK_BATCH_VECS=256 RERANK_BATCH_MB=16 RERANK_GAP_GIDS=16 \
+  /home/danbai.wq/DiskANN/perf/demo/monitor.sh
+```
+
+- 预期效果
+  - `read_IOPS` 显著下降（小随机读 → 少量大顺序读），`read_kbs` 更平滑、均值更高。
+  - CPU 利用率回升（典型从 <200% 回升至 400%~700%+，取决于设备与并发）。
+  - 结果 Top-K 正确性不变：最终仍基于“真距排序”。
+
+- 兼容与边界
+  - 该优化基于 `.fbin` 行顺序布局；若 `.fbin` 经特殊乱序打散，将退化为较多小段读（仍可逐向量兜底）。
+  - O_DIRECT 对齐失败会回退至逐向量路径；必要时可将 `RERANK_ALIGN_BS` 调整为 `512`。
 
 #### 代码定位（便于查阅实现）
 - `demo/src/search.cpp`

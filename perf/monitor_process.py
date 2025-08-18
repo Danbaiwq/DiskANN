@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import matplotlib.dates as mdates
 from datetime import datetime
+import os
 
 
 def find_process(pid_or_name):
@@ -42,7 +43,11 @@ def monitor_process(pid_or_name, duration, interval, log_file):
     # print("%-10s %-12s %-10s %-12s %-12s" % ("Time(s)", "Mem(MB)", "CPU(%)", "Read(kB/s)", "Write(kB/s)"))
 
     start_time = time.time()
-    end_time = start_time + duration
+    # duration<=0 表示“随进程生命周期”
+    if duration is None or duration <= 0:
+        end_time = float('inf')
+    else:
+        end_time = start_time + duration
     data = []
     max_rss_mb = 0
     total_rss_mb = 0
@@ -75,7 +80,7 @@ def monitor_process(pid_or_name, duration, interval, log_file):
     # 新增：初始化缺页计数（来自 /proc/<pid>/stat 的累积值）
     def read_faults(pid):
         try:
-            with open(f"/proc/{pid}/stat", "r") as f:
+            with open("/proc/{}/stat".format(pid), "r") as f:
                 s = f.read()
             # comm 字段包含在括号内，先找到右括号后再 split
             rpar = s.rfind(')')
@@ -188,7 +193,8 @@ def monitor_process(pid_or_name, duration, interval, log_file):
             sample_count += 1
 
         except (psutil.NoSuchProcess, psutil.AccessDenied):
-            print("\n❌ Process %d has exited or is no longer accessible." % proc.pid)
+            # 进程已退出：作为正常结束处理
+            print("\nProcess %d has exited. Finishing monitoring." % (proc.pid if 'proc' in locals() else -1))
             break
         except KeyboardInterrupt:
             print("\n\n🛑 Monitoring interrupted by user.")
@@ -233,7 +239,7 @@ def monitor_process(pid_or_name, duration, interval, log_file):
 
 
 def plot_data(df, log_file):
-    """Plot monitoring data: Memory, CPU, I/O"""
+    """Plot monitoring data: Memory, CPU, and I/O"""
     plt.style.use('seaborn-v0_8')
     
     fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 10), sharex=True)
@@ -278,13 +284,17 @@ def plot_data(df, log_file):
     output_image = log_file.replace(".csv", ".png").replace(".log", ".png")
     plt.savefig(output_image, dpi=150, bbox_inches='tight')
     print("📈 Chart saved as: %s" % output_image)
-    plt.show()
+    # 默认不阻塞显示，避免脚本等待交互；仅在设置 PLOT_SHOW=1 时显示
+    if os.environ.get("PLOT_SHOW", "0").lower() in ("1", "true", "yes"):
+        plt.show()
+    else:
+        plt.close(fig)
 
 
 def main():
     parser = argparse.ArgumentParser(description="Monitor memory, CPU, and I/O usage of a process")
     parser.add_argument("process", help="Process name or PID (e.g., firefox or 1234)")
-    parser.add_argument("-d", "--duration", type=int, default=60, help="Monitoring duration in seconds (default: 60)")
+    parser.add_argument("-d", "--duration", type=int, default=60, help="Monitoring duration in seconds (0=until process exit; default: 60)")
     parser.add_argument("-i", "--interval", type=float, default=1.0, help="Sampling interval in seconds (default: 1.0)")
     parser.add_argument("-o", "--output", default="process_monitor.csv", help="Output log file (default: process_monitor.csv)")
 
