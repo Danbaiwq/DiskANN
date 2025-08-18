@@ -37,6 +37,7 @@
 #include <future>
 #include <deque>
 #include <memory>
+#include <immintrin.h>
 
 #ifdef HAS_IO_URING
 extern "C" {
@@ -546,6 +547,137 @@ static void bq_graph_search_loaded(
     out_local_cand.insert(out_local_cand.end(), best.begin(), best.end());
 }
 
+static inline float l2_distance_sqr_avx2(const float* a, const float* b, size_t dim) {
+    __m256 acc0 = _mm256_setzero_ps();
+    __m256 acc1 = _mm256_setzero_ps();
+    __m256 acc2 = _mm256_setzero_ps();
+    __m256 acc3 = _mm256_setzero_ps();
+    size_t i = 0;
+    // 32维一组的四路展开
+    for (; i + 32 <= dim; i += 32) {
+        __m256 a0 = _mm256_loadu_ps(a + i + 0);
+        __m256 b0 = _mm256_loadu_ps(b + i + 0);
+        __m256 d0 = _mm256_sub_ps(a0, b0);
+        acc0 = _mm256_fmadd_ps(d0, d0, acc0);
+
+        __m256 a1 = _mm256_loadu_ps(a + i + 8);
+        __m256 b1 = _mm256_loadu_ps(b + i + 8);
+        __m256 d1 = _mm256_sub_ps(a1, b1);
+        acc1 = _mm256_fmadd_ps(d1, d1, acc1);
+
+        __m256 a2 = _mm256_loadu_ps(a + i + 16);
+        __m256 b2 = _mm256_loadu_ps(b + i + 16);
+        __m256 d2 = _mm256_sub_ps(a2, b2);
+        acc2 = _mm256_fmadd_ps(d2, d2, acc2);
+
+        __m256 a3 = _mm256_loadu_ps(a + i + 24);
+        __m256 b3 = _mm256_loadu_ps(b + i + 24);
+        __m256 d3 = _mm256_sub_ps(a3, b3);
+        acc3 = _mm256_fmadd_ps(d3, d3, acc3);
+    }
+    // 合并acc
+    __m256 acc = _mm256_add_ps(_mm256_add_ps(acc0, acc1), _mm256_add_ps(acc2, acc3));
+    // 余下的8维块
+    for (; i + 8 <= dim; i += 8) {
+        __m256 va = _mm256_loadu_ps(a + i);
+        __m256 vb = _mm256_loadu_ps(b + i);
+        __m256 vd = _mm256_sub_ps(va, vb);
+        acc = _mm256_fmadd_ps(vd, vd, acc);
+    }
+    // 向量归约 + 标量尾
+    float sum = 0.0f;
+    float tmp[8];
+    _mm256_storeu_ps(tmp, acc);
+    sum += tmp[0] + tmp[1] + tmp[2] + tmp[3] + tmp[4] + tmp[5] + tmp[6] + tmp[7];
+    for (; i < dim; ++i) {
+        float d = a[i] - b[i];
+        sum += d * d;
+    }
+    return sum;
+}
+
+static inline float l2_distance_sqr_avx2_dim128(const float* a, const float* b) {
+    __m256 acc0 = _mm256_setzero_ps();
+    __m256 acc1 = _mm256_setzero_ps();
+    __m256 acc2 = _mm256_setzero_ps();
+    __m256 acc3 = _mm256_setzero_ps();
+    __m256 acc4 = _mm256_setzero_ps();
+    __m256 acc5 = _mm256_setzero_ps();
+    __m256 acc6 = _mm256_setzero_ps();
+    __m256 acc7 = _mm256_setzero_ps();
+    for (int i = 0; i < 128; i += 32) {
+        __m256 a0 = _mm256_loadu_ps(a + i + 0);
+        __m256 b0 = _mm256_loadu_ps(b + i + 0);
+        __m256 d0 = _mm256_sub_ps(a0, b0);
+        acc0 = _mm256_fmadd_ps(d0, d0, acc0);
+
+        __m256 a1 = _mm256_loadu_ps(a + i + 8);
+        __m256 b1 = _mm256_loadu_ps(b + i + 8);
+        __m256 d1 = _mm256_sub_ps(a1, b1);
+        acc1 = _mm256_fmadd_ps(d1, d1, acc1);
+
+        __m256 a2 = _mm256_loadu_ps(a + i + 16);
+        __m256 b2 = _mm256_loadu_ps(b + i + 16);
+        __m256 d2 = _mm256_sub_ps(a2, b2);
+        acc2 = _mm256_fmadd_ps(d2, d2, acc2);
+
+        __m256 a3 = _mm256_loadu_ps(a + i + 24);
+        __m256 b3 = _mm256_loadu_ps(b + i + 24);
+        __m256 d3 = _mm256_sub_ps(a3, b3);
+        acc3 = _mm256_fmadd_ps(d3, d3, acc3);
+    }
+    __m256 sum01 = _mm256_add_ps(acc0, acc1);
+    __m256 sum23 = _mm256_add_ps(acc2, acc3);
+    __m256 sum = _mm256_add_ps(sum01, sum23);
+    float tmp[8];
+    _mm256_storeu_ps(tmp, sum);
+    return tmp[0] + tmp[1] + tmp[2] + tmp[3] + tmp[4] + tmp[5] + tmp[6] + tmp[7];
+}
+
+static inline float l2_distance_sqr_avx2_dim256(const float* a, const float* b) {
+    __m256 acc0 = _mm256_setzero_ps();
+    __m256 acc1 = _mm256_setzero_ps();
+    __m256 acc2 = _mm256_setzero_ps();
+    __m256 acc3 = _mm256_setzero_ps();
+    __m256 acc4 = _mm256_setzero_ps();
+    __m256 acc5 = _mm256_setzero_ps();
+    __m256 acc6 = _mm256_setzero_ps();
+    __m256 acc7 = _mm256_setzero_ps();
+    for (int i = 0; i < 256; i += 32) {
+        __m256 a0 = _mm256_loadu_ps(a + i + 0);
+        __m256 b0 = _mm256_loadu_ps(b + i + 0);
+        __m256 d0 = _mm256_sub_ps(a0, b0);
+        acc0 = _mm256_fmadd_ps(d0, d0, acc0);
+
+        __m256 a1 = _mm256_loadu_ps(a + i + 8);
+        __m256 b1 = _mm256_loadu_ps(b + i + 8);
+        __m256 d1 = _mm256_sub_ps(a1, b1);
+        acc1 = _mm256_fmadd_ps(d1, d1, acc1);
+
+        __m256 a2 = _mm256_loadu_ps(a + i + 16);
+        __m256 b2 = _mm256_loadu_ps(b + i + 16);
+        __m256 d2 = _mm256_sub_ps(a2, b2);
+        acc2 = _mm256_fmadd_ps(d2, d2, acc2);
+
+        __m256 a3 = _mm256_loadu_ps(a + i + 24);
+        __m256 b3 = _mm256_loadu_ps(b + i + 24);
+        __m256 d3 = _mm256_sub_ps(a3, b3);
+        acc3 = _mm256_fmadd_ps(d3, d3, acc3);
+    }
+    __m256 sum01 = _mm256_add_ps(acc0, acc1);
+    __m256 sum23 = _mm256_add_ps(acc2, acc3);
+    __m256 sum = _mm256_add_ps(sum01, sum23);
+    float tmp[8];
+    _mm256_storeu_ps(tmp, sum);
+    return tmp[0] + tmp[1] + tmp[2] + tmp[3] + tmp[4] + tmp[5] + tmp[6] + tmp[7];
+}
+
+static inline float l2_distance_sqr_avx2_opt(const float* a, const float* b, size_t dim) {
+    if (dim == 128) return l2_distance_sqr_avx2_dim128(a, b);
+    if (dim == 256) return l2_distance_sqr_avx2_dim256(a, b);
+    return l2_distance_sqr_avx2(a, b, dim);
+}
+
 QueryResult search_two_stage(
     const std::vector<float>& query,
     diskann::Index<float, uint32_t, uint32_t>& medoid_index,
@@ -902,11 +1034,7 @@ QueryResult search_two_stage(
                                         for (uint32_t gid = c.first_gid; gid <= c.last_gid; ++gid) {
                                             size_t rel = static_cast<size_t>(gid - c.first_gid);
                                             const float* vptr = reinterpret_cast<const float*>(base_ptr + rel * vec_bytes);
-                                            float dist = 0.0f;
-                                            for (size_t d = 0; d < base_dim; ++d) {
-                                                float diff = vptr[d] - query[d];
-                                                dist += diff * diff;
-                                            }
+                                            float dist = l2_distance_sqr_avx2_opt(vptr, query.data(), base_dim);
                                             rerank_pairs.emplace_back(dist, gid);
                                         }
                                     } else {
@@ -939,7 +1067,6 @@ QueryResult search_two_stage(
                         bool want_uring = getenv_bool2("RERANK_IO_URING", false);
                         if (want_uring && !segments.empty()) {
                             unsigned depth = static_cast<unsigned>(read_env_size_t("RERANK_URING_DEPTH", 64));
-                            std::cout << "RERANK_URING_DEPTH: " << depth << std::endl;
                             if (depth == 0) depth = 64;
                             io_uring ring{};
                             if (::io_uring_queue_init(depth, &ring, 0) == 0) {
@@ -975,11 +1102,7 @@ QueryResult search_two_stage(
                                             for (uint32_t gid = c->first_gid; gid <= c->last_gid; ++gid) {
                                                 size_t rel = static_cast<size_t>(gid - c->first_gid);
                                                 const float* vptr = reinterpret_cast<const float*>(base_ptr + rel * vec_bytes);
-                                                float dist = 0.0f;
-                                                for (size_t d = 0; d < base_dim; ++d) {
-                                                    float diff = vptr[d] - query[d];
-                                                    dist += diff * diff;
-                                                }
+                                                float dist = l2_distance_sqr_avx2_opt(vptr, query.data(), base_dim);
                                                 rerank_pairs.emplace_back(dist, gid);
                                             }
                                         } else {
@@ -1019,22 +1142,14 @@ QueryResult search_two_stage(
                                         for (uint32_t gid = seg.first_gid; gid <= seg.last_gid; ++gid) {
                                             size_t rel = static_cast<size_t>(gid - seg.first_gid);
                                             const float* vptr = reinterpret_cast<const float*>(base_ptr + rel * vec_bytes);
-                                            float dist = 0.0f;
-                                            for (size_t d = 0; d < base_dim; ++d) {
-                                                float diff = vptr[d] - query[d];
-                                                dist += diff * diff;
-                                            }
+                                            float dist = l2_distance_sqr_avx2_opt(vptr, query.data(), base_dim);
                                             out.emplace_back(dist, gid);
                                         }
                                     } else {
                                         for (uint32_t gid = seg.first_gid; gid <= seg.last_gid; ++gid) {
                                             const off_t off = header_bytes + static_cast<off_t>(sizeof(float)) * static_cast<off_t>(gid) * static_cast<off_t>(base_dim);
                                             if (!read_vec_od(fd, off)) { continue; }
-                                            float dist = 0.0f;
-                                            for (size_t d = 0; d < base_dim; ++d) {
-                                                float diff = buf[d] - query[d];
-                                                dist += diff * diff;
-                                            }
+                                            float dist = l2_distance_sqr_avx2_opt(buf.data(), query.data(), base_dim);
                                             out.emplace_back(dist, gid);
                                         }
                                     }
@@ -1063,11 +1178,7 @@ QueryResult search_two_stage(
                                     for (uint32_t gid = seg.first_gid; gid <= seg.last_gid; ++gid) {
                                         size_t rel = static_cast<size_t>(gid - seg.first_gid);
                                         const float* vptr = reinterpret_cast<const float*>(base_ptr + rel * vec_bytes);
-                                        float dist = 0.0f;
-                                        for (size_t d = 0; d < base_dim; ++d) {
-                                            float diff = vptr[d] - query[d];
-                                            dist += diff * diff;
-                                        }
+                                        float dist = l2_distance_sqr_avx2_opt(vptr, query.data(), base_dim);
                                         rerank_pairs.emplace_back(dist, gid);
                                     }
                                     segment_ok = true;
@@ -1078,11 +1189,7 @@ QueryResult search_two_stage(
                                 for (uint32_t gid = seg.first_gid; gid <= seg.last_gid; ++gid) {
                                     const off_t off = header_bytes + static_cast<off_t>(sizeof(float)) * static_cast<off_t>(gid) * static_cast<off_t>(base_dim);
                                     if (!read_vec_od(fd, off)) { short_reads++; continue; }
-                                    float dist = 0.0f;
-                                    for (size_t d = 0; d < base_dim; ++d) {
-                                        float diff = buf[d] - query[d];
-                                        dist += diff * diff;
-                                    }
+                                    float dist = l2_distance_sqr_avx2_opt(buf.data(), query.data(), base_dim);
                                     rerank_pairs.emplace_back(dist, gid);
                                 }
                             }
@@ -1119,11 +1226,7 @@ QueryResult search_two_stage(
                                 const off_t off = header_bytes + static_cast<off_t>(sizeof(float)) * static_cast<off_t>(gid) * static_cast<off_t>(base_dim);
                                 ssize_t br = ::pread(fd_plain, reinterpret_cast<char*>(buf.data()), vec_bytes, off);
                                 if (br != static_cast<ssize_t>(vec_bytes)) { short2++; continue; }
-                                float dist = 0.0f;
-                                for (size_t d = 0; d < base_dim; ++d) {
-                                    float diff = buf[d] - query[d];
-                                    dist += diff * diff;
-                                }
+                                float dist = l2_distance_sqr_avx2_opt(buf.data(), query.data(), base_dim);
                                 rerank_pairs2.emplace_back(dist, gid);
                             }
                             ::close(fd_plain);
@@ -1170,11 +1273,7 @@ QueryResult search_two_stage(
                                     uint32_t gid = candidates[i].second;
                                     if (gid >= base_num) { skipped_oob++; continue; }
                                     const float* vec = vec_base + static_cast<size_t>(gid) * base_dim;
-                                    float dist = 0.0f;
-                                    for (size_t d = 0; d < base_dim; ++d) {
-                                        float diff = vec[d] - query[d];
-                                        dist += diff * diff;
-                                    }
+                                    float dist = l2_distance_sqr_avx2_opt(vec, query.data(), base_dim);
                                     rerank_pairs.emplace_back(dist, gid);
                                 }
                                 if (skipped_oob > 0) {
