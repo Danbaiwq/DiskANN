@@ -33,7 +33,9 @@ RERANK_USE_MMAP="${RERANK_USE_MMAP:-0}"
 
 # 新增：BQ 缓存内存预算（MB）
 BQ_BUCKET_CACHE_MB="${BQ_BUCKET_CACHE_MB:-64}"
-BQ_GRAPH_CACHE_MB="${BQ_GRAPH_CACHE_MB:-300}"
+BQ_GRAPH_CACHE_MB="${BQ_GRAPH_CACHE_MB:-512}"
+# 新增：预热前 N 个最大桶（按桶大小排序，0 表示不预热）
+BQ_PREWARM_TOP="${BQ_PREWARM_TOP:-0}"
 # =====================================
 
 # 基本校验
@@ -63,6 +65,7 @@ cat <<EOF
 [demo search] BQ_SEEDS           : $BQ_SEEDS
 [demo search] BQ_BUCKET_CACHE_MB : $BQ_BUCKET_CACHE_MB
 [demo search] BQ_GRAPH_CACHE_MB  : $BQ_GRAPH_CACHE_MB
+[demo search] BQ_PREWARM_TOP     : $BQ_PREWARM_TOP
 EOF
 
 # 运行（程序内部会在 BQ 模式自动禁用 Vamana LRU Cache）
@@ -75,6 +78,7 @@ RERANK_O_DIRECT="$RERANK_O_DIRECT" \
 RERANK_USE_MMAP="$RERANK_USE_MMAP" \
 BQ_BUCKET_CACHE_MB="$BQ_BUCKET_CACHE_MB" \
 BQ_GRAPH_CACHE_MB="$BQ_GRAPH_CACHE_MB" \
+BQ_PREWARM_TOP="$BQ_PREWARM_TOP" \
 "$DEMO_BIN" "$QUERY_FBIN" "$GROUNDTRUTH_IVECS" &
 
 # 获取刚启动的子进程 PID

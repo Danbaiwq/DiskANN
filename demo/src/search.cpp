@@ -31,6 +31,7 @@
 #include <list>
 #include <functional>
 #include <mutex>
+#include <atomic>
 
 static inline std::string get_env_str_local(const char* key) {
     const char* v = std::getenv(key);
@@ -503,6 +504,37 @@ QueryResult search_two_stage(
         s_graph_cache  = std::make_unique<BQGraphCache>( graph_mb * 1024ULL * 1024ULL);
         std::cout << "[BQ Cache] bucket=" << bucket_mb << "MB, graph=" << graph_mb << "MB" << std::endl;
     });
+
+    // 可选：按桶大小预热前 N 个桶，减少前期 I/O 抖动
+    static std::atomic<bool> s_prewarmed{false};
+    static std::mutex s_prewarm_mtx;
+    if (use_bq && !s_prewarmed.load()) {
+        std::lock_guard<std::mutex> g(s_prewarm_mtx);
+        if (!s_prewarmed.load()) {
+            size_t topN = 0;
+            if (const char* env = std::getenv("BQ_PREWARM_TOP")) { try { topN = std::stoul(env); } catch (...) {} }
+            if (topN > 0) {
+                std::vector<std::pair<uint32_t, size_t>> by_size;
+                by_size.reserve(buckets.size());
+                for (uint32_t bid = 0; bid < buckets.size(); ++bid) {
+                    by_size.emplace_back(bid, buckets[bid].size());
+                }
+                std::sort(by_size.begin(), by_size.end(), [](auto& a, auto& b){ return a.second > b.second; });
+                topN = std::min(topN, by_size.size());
+                for (size_t i = 0; i < topN; ++i) {
+                    uint32_t bid = by_size[i].first;
+                    size_t bsz = by_size[i].second;
+                    if (bsz >= bq_graph_threshold) {
+                        if (s_graph_cache) { s_graph_cache->get_or_load(bid, [&](BQGraphData& dst){ return load_bq_graph(bid, dst); }); }
+                    } else {
+                        if (s_bucket_cache) { s_bucket_cache->get_or_load(bid, [&](BQBucketData& dst){ return load_bq_bucket(bid, dst); }); }
+                    }
+                }
+                std::cout << "[BQ Cache] prewarmed top " << topN << " buckets by size" << std::endl;
+            }
+            s_prewarmed.store(true);
+        }
+    }
 
     // 第一步：在medoid_vamana查找最近的bucket_id
     std::vector<uint32_t> nearest_bucket_ids(f);

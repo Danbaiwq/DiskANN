@@ -898,3 +898,46 @@ BQ_GRAPH_THRESHOLD=2000 BQ_EF_SEARCH=128 BQ_SEEDS=8 ./demo/demo_test /path/to/qu
   - `load_buckets(...)`、`save_buckets(...)`：桶内局部ID与全局ID映射读写。
 - 脚本
   - `demo/scripts/search.sh`、`perf/demo_search_monitor.sh`：提供 `BASE_FBIN` 与 `RERANK_O_DIRECT` 的默认配置与透传；一键运行与监控。 
+
+### 7.11 缓解 I/O 波动的缓存优化（BQ 产物缓存 + 预热）
+为降低查询阶段“重复加载 BQ 产物（bq.bin/bqgraph）”导致的 I/O 抖动与内存锯齿，并让 CPU 更早进入稳定高并发，demo 在 BQ 模式下新增了轻量级缓存与可选预热功能：
+
+- 缓存机制（非阻塞 LRU）
+  - 缓存对象：
+    - 小桶量化产物缓存（bucket cache）：`bucket_<i>_bq.bin`
+    - 大桶图缓存（graph cache）：`bucket_<i>_bqgraph.bin`
+  - 策略与特点：
+    - 非阻塞插入：加载在锁外进行，插入尝试 `try_lock`，失败则直接使用已加载对象，避免阻塞并发查询
+    - 限量淘汰：单次最多淘汰 3 个条目以快速释放空间，降低长时间持锁风险
+    - 目标效果：减少重复磁盘读取与大块内存反复分配/释放，平滑 `read_kbs` 曲线、降低 `faults/s`，并提升 CPU 利用率
+
+- 可选预热（Prewarm）
+  - 行为：按桶大小降序选取前 N 个桶进行一次性预加载
+  - 作用：在开始阶段提前填充缓存，降低冷启动 I/O 抖动，让 CPU 更快达到高占用
+
+- 环境变量（程序端默认值与脚本示例）
+  - `BQ_BUCKET_CACHE_MB`：小桶量化产物缓存预算（MB）。程序默认 256；perf 脚本默认 64
+  - `BQ_GRAPH_CACHE_MB`：大桶图缓存预算（MB）。程序默认 256；perf 脚本默认 512
+  - `BQ_PREWARM_TOP`：预热的“最大桶”数量（0 表示不预热）。程序/脚本默认 0
+
+- 快速使用示例（建议在 `build/` 下执行）
+```bash
+# 建议的缓存与预热组合（按机器与数据规模可调整）
+export BQ_BUCKET_CACHE_MB=64
+export BQ_GRAPH_CACHE_MB=512
+export BQ_PREWARM_TOP=16
+
+# 其他常用参数（参考前文）
+export RERANK_O_DIRECT=1
+export RERANK_USE_MMAP=0
+
+# 运行带监控的 demo（脚本会透传上述变量）
+/home/danbai.wq/DiskANN/perf/demo/monitor.sh
+```
+
+- 观测指标（`perf/demo/search_monitor.csv` 与图表）
+  - `read_kbs` 更均衡、无大幅锯齿
+  - `read_chars_kbs`、`major_faults_s` 降低（避免 mmap 与页缓存波动）
+  - CPU 利用率在开始阶段更快上升，整体更接近硬件上限（例如 8 核目标 600%+）
+
+说明：以上缓存/预热仅在 BQ 模式生效；RAW 模式仍沿用 Vamana 子图与其独立的 Index 缓存策略。 
