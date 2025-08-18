@@ -40,7 +40,7 @@ BQ_PREWARM_TOP="${BQ_PREWARM_TOP:-0}"
 # 新增：复排 O_DIRECT 读优化参数（仅磁盘读，不启用 mmap）
 RERANK_ALIGN_BS="${RERANK_ALIGN_BS:-4096}"       # 对齐粒度（字节），建议 4096；自动兼容 >=512
 RERANK_BATCH_VECS="${RERANK_BATCH_VECS:-256}"    # 每段最大向量数
-RERANK_BATCH_MB="${RERANK_BATCH_MB:-16}"          # 每段最大读取字节数（MB）
+RERANK_BATCH_MB="${RERANK_BATCH_MB:-32}"          # 每段最大读取字节数（MB）
 RERANK_GAP_GIDS="${RERANK_GAP_GIDS:-16}"          # 合并段允许的 gid 间隙（行数）
 
 # 新增：并行与异步 I/O 参数（任务 4 & 任务 5）

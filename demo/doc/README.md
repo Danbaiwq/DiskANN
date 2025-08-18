@@ -1015,10 +1015,10 @@ export RERANK_AIO_DEPTH=64                # 队列深度
 
 # 保持 O_DIRECT 顺序合并读取（推荐）
 export RERANK_O_DIRECT=1
-export RERANK_ALIGN_BS=4096
-export RERANK_BATCH_VECS=256
-export RERANK_BATCH_MB=16
-export RERANK_GAP_GIDS=16
+export RERANK_ALIGN_BS=4096               # 为O_DIRECT指定内存对齐字节。
+export RERANK_BATCH_VECS=256              # 批次上限(数量)：一次最多读多少个向量。
+export RERANK_BATCH_MB=16                 # 批次上限(大小)：一次最多读多少MB的数据。
+export RERANK_GAP_GIDS=16                 # 定义多近的随机读可以被合并成一个顺序读
 
 # 运行带监控脚本
 /home/danbai.wq/DiskANN/perf/demo/monitor.sh
