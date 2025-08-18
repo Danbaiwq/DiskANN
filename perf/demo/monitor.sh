@@ -45,8 +45,11 @@ RERANK_GAP_GIDS="${RERANK_GAP_GIDS:-16}"          # 合并段允许的 gid 间�
 
 # 新增：并行与异步 I/O 参数（任务 4 & 任务 5）
 RERANK_IO_THREADS="${RERANK_IO_THREADS:-8}"       # >1 启用线程池并行 pread（如 4/8）
-RERANK_IO_URING="${RERANK_IO_URING:-1}"           # 1 启用 io_uring 异步 I/O（需 liburing）
-RERANK_URING_DEPTH="${RERANK_URING_DEPTH:-64}"    # io_uring 队列深度
+RERANK_IO_URING="${RERANK_IO_URING:-0}"           # 1 启用 io_uring 异步 I/O（需 liburing）
+RERANK_URING_DEPTH="${RERANK_URING_DEPTH:-128}"    # io_uring 队列深度
+# 新增：libaio 异步 I/O（兼容旧内核）
+RERANK_LIBAIO="${RERANK_LIBAIO:-0}"               # 1 启用 libaio（需 libaio）
+RERANK_AIO_DEPTH="${RERANK_AIO_DEPTH:-128}"        # libaio 队列深度
 # =====================================
 
 # 基本校验
@@ -84,6 +87,8 @@ cat <<EOF
 [demo search] RERANK_IO_THREADS  : $RERANK_IO_THREADS
 [demo search] RERANK_IO_URING    : $RERANK_IO_URING
 [demo search] RERANK_URING_DEPTH : $RERANK_URING_DEPTH
+[demo search] RERANK_LIBAIO      : $RERANK_LIBAIO
+[demo search] RERANK_AIO_DEPTH   : $RERANK_AIO_DEPTH
 EOF
 
 # 确保绘图不阻塞（monitor_process.py 内已支持 PLOT_SHOW 环境开关）
@@ -107,6 +112,8 @@ RERANK_GAP_GIDS="$RERANK_GAP_GIDS" \
 RERANK_IO_THREADS="$RERANK_IO_THREADS" \
 RERANK_IO_URING="$RERANK_IO_URING" \
 RERANK_URING_DEPTH="$RERANK_URING_DEPTH" \
+RERANK_LIBAIO="$RERANK_LIBAIO" \
+RERANK_AIO_DEPTH="$RERANK_AIO_DEPTH" \
 "$DEMO_BIN" "$QUERY_FBIN" "$GROUNDTRUTH_IVECS" &
 
 PID=$!

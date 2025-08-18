@@ -654,7 +654,7 @@ ls demo/demo_test
 
 ### 6.4 脚本化运行（推荐）
 
-已提供脚本简化使用，直接在脚本顶部“用户配置区”填写路径与参数即可运行。
+已提供脚本简化使用，直接在脚本顶部"用户配置区"填写路径与参数即可运行。
 
 - 构建脚本：`DiskANN/demo/scripts/build.sh`
   - 配置项（脚本顶部修改）：
@@ -685,7 +685,7 @@ ls demo/demo_test
     ```
 
 - 性能监控脚本：`DiskANN/perf/demo/monitor.sh`
-  - 作用：一键运行查询并采集 CPU/RSS/IO，输出 CSV/PNG；已内置“真距复排磁盘读优化”的缺省参数
+  - 作用：一键运行查询并采集 CPU/RSS/IO，输出 CSV/PNG；已内置"真距复排磁盘读优化"的缺省参数
   - 关键参数（可通过环境变量覆盖）：
     - `RERANK_O_DIRECT`（默认 1，开启 O_DIRECT）
     - `RERANK_USE_MMAP`（默认 0，禁用 mmap）
@@ -765,7 +765,7 @@ ls demo/demo_test
 
 ## 7. BQ 量化优化（RaBitQ 集成）
 
-为降低桶内检索的内存与计算成本，支持在构建阶段对桶内向量做 BQ 压缩，并在查询阶段对“大桶”采用基于压缩向量的图搜索（bqgraph），对“小桶”采用 fastscan 暴搜。
+为降低桶内检索的内存与计算成本，支持在构建阶段对桶内向量做 BQ 压缩，并在查询阶段对"大桶"采用基于压缩向量的图搜索（bqgraph），对"小桶"采用 fastscan 暴搜。
 
 ### 7.1 总览
 - 模式开关：通过环境变量控制
@@ -778,7 +778,7 @@ ls demo/demo_test
   - 大桶（≥ 阈值）：`bucket_<i>_bqgraph.bin`
 
 ### 7.2 构建流程（固定窗口C）
-- 分桶不变（KMeans + 距离约束）：按“距质心升序”作为插入顺序
+- 分桶不变（KMeans + 距离约束）：按"距质心升序"作为插入顺序
 - 桶大小与产物：
   - 小桶：直接量化并写出 `bucket_<i>_bq.bin`
   - 大桶：构建 bqgraph（压缩向量图），写出 `bucket_<i>_bqgraph.bin`
@@ -786,16 +786,16 @@ ls demo/demo_test
   - Header: `uint64 padded_dim, uint64 bits, uint64 num, uint64 degree`
   - Body: batched 1bit codes + `f_add[num]` + `f_rescale[num]` + 可选 `ex_blob`（当 `BQ_BITS>1`）+ 邻接表（`num*degree`）
 - 邻接构建（与 Vamana 思路一致，固定窗口 C）：
-  - 候选生成：在“当前已插入子图”的入口点（初始化使用 medoid）上，用固定窗口 C（等于 `build_complexity`）做图上候选收集
+  - 候选生成：在"当前已插入子图"的入口点（初始化使用 medoid）上，用固定窗口 C（等于 `build_complexity`）做图上候选收集
   - 剪枝：对候选按距离升序，采用 α-遮挡（α=1.2）剔除冗余；不足 `degree` 再按近邻补齐
   - 距离：统一使用 RaBitQ 的 ex-bits 提升后的估计距离（1bit fastscan 粗评 + ex_bits boosting）
   - 说明：当前实现不包含弱互连与饱和 pass，不包含自适应 C 与入口点动态细化（以降低复杂度与便于稳定对齐）
 
 ### 7.3 构建并行优化（两阶段小批）
-为降低构建时间、避免块间并行对候选决策的干扰，采用“两阶段小批”的实现：
+为降低构建时间、避免块间并行对候选决策的干扰，采用"两阶段小批"的实现：
 - 批次切分：按插入顺序将桶内向量切成大小 B（默认 1024）的批次
 - Phase A（候选与剪枝，读取多/写入少）：
-  - 在“上一批完成后的稳定图快照”上，逐点做固定 C 的候选搜集与 α-遮挡剪枝
+  - 在"上一批完成后的稳定图快照"上，逐点做固定 C 的候选搜集与 α-遮挡剪枝
   - 结果保存在本批的本地缓冲，不改全局邻接
 - Phase B（合并写入）：
   - 将本批的邻接结果顺序写入全局邻接；批与批之间以栅栏分隔，保证下一批的候选基于稳定快照
@@ -805,7 +805,7 @@ ls demo/demo_test
 - 第一阶段：在 `medoid_vamana.index` 上搜索，得到最相近的 `f` 个桶ID
 - 第二阶段：
   - 大桶：若存在 `bucket_<i>_bqgraph.bin`，则在 bqgraph 上做 efSearch（HNSW 风格）
-    - 入口种子：综合“高入度 hub”与“按 stride 采样并评估距离的 seeds”合并去重
+    - 入口种子：综合"高入度 hub"与"按 stride 采样并评估距离的 seeds"合并去重
     - efSearch：维护候选小顶堆与最佳大顶堆（可通过 `BQ_EF_SEARCH` 控制宽度），以 ex-bits 距离扩展邻居、早停判断
     - 轻量增广：对桶内按 stride 采样最多 1024 个点，做一次快速评估加入候选后再截断至 top-k（提升召回、代价可控）
   - 小桶：读取 `bucket_<i>_bq.bin`，用 fastscan 批量估计并可选 ex-bits 提升，选取 top-k
@@ -837,7 +837,7 @@ BQ_EF_SEARCH=128 BQ_SEEDS=8 ./demo/demo_test /path/to/query.fbin /path/to/ground
   - `BQ_BITS`：量化比特（当前默认 12）
   - `BQ_GRAPH_THRESHOLD`：大桶阈值（≥ 阈值构 bqgraph，否则写 bq.bin）
   - 固定图参数（在 `main.cpp`）：`graph_degree=32`、`build_complexity=50`、`alpha=1.2`
-  - `BQ_SATURATE_PASS`：是否启用“轻量互连/饱和”微修复（度数不变，仅替换最差邻 + 弱互连补边），`1` 开启（默认），`0` 关闭
+  - `BQ_SATURATE_PASS`：是否启用"轻量互连/饱和"微修复（度数不变，仅替换最差邻 + 弱互连补边），`1` 开启（默认），`0` 关闭
 - 查询端：
   - `BQ_EF_SEARCH`：bqgraph 搜索的 ef 宽度（默认 128）
   - `BQ_SEEDS`：入口种子数量（默认 8）。搜索种子综合 hub 与采样 seeds
@@ -846,7 +846,7 @@ BQ_EF_SEARCH=128 BQ_SEEDS=8 ./demo/demo_test /path/to/query.fbin /path/to/ground
 ### 7.7 其它可选的构建优化（未启用，后续可考虑）
 - K 步交错插入（K-step interleaving）：将插入顺序按步长 K 交错分段，分段内串行或小并发，段与段之间并行，降低强相关点同批插入概率
 - 子域分片 + 边界修复：按空间/质心距离将桶切分多个子域，域内并行构图，最后做跨域边界的连接修复（以固定 C 做跨域候选），扩展性更强
-- 双缓冲入口点集合：维护“稳定入口集 + 最新入口集”，候选搜索固定用稳定集，每批完成后用本批代表点更新稳定集，提升可达性
+- 双缓冲入口点集合：维护"稳定入口集 + 最新入口集"，候选搜索固定用稳定集，每批完成后用本批代表点更新稳定集，提升可达性
 
 ### 7.8 注意事项
 - 维度对齐：fastscan LUT 按 32 批处理，`padded_dim = ceil(dim/4)*4`
@@ -859,8 +859,8 @@ BQ_EF_SEARCH=128 BQ_SEEDS=8 ./demo/demo_test /path/to/query.fbin /path/to/ground
   - 多入口 seeds（等间隔采样为主），`BQ_SEEDS` 控制数量（默认 8）
 - BQ 模式内存优化
   - 搜索阶段自动禁用 Vamana LRU Cache，避免额外 ~1GB 内存占用
-- 构建端“轻量互连/饱和”微修复（度数不变）
-  - 通过 `BQ_SATURATE_PASS=1` 启用（默认开启），仅对每个点至多一次“替换最差邻”，并对对端做“弱互连”尝试
+- 构建端"轻量互连/饱和"微修复（度数不变）
+  - 通过 `BQ_SATURATE_PASS=1` 启用（默认开启），仅对每个点至多一次"替换最差邻"，并对对端做"弱互连"尝试
   - 不增加索引体积与出度，仅提升可达性；可用 `BQ_SATURATE_PASS=0` 做 A/B
 
 示例：
@@ -873,7 +873,7 @@ BQ_GRAPH_THRESHOLD=2000 BQ_EF_SEARCH=128 BQ_SEEDS=8 ./demo/demo_test /path/to/qu
 ``` 
 
 ### 7.10 末端真距复排（BASE_FBIN + mmap / pread(O_DIRECT)）
-为解决不同桶 BQ 估计距离跨桶不可比的问题，demo 在合并 f×k 候选后，支持“按原始向量真 L2 距离复排”的通用实现，确保最终 Top-K 基于同一度量准则：
+为解决不同桶 BQ 估计距离跨桶不可比的问题，demo 在合并 f×k 候选后，支持"按原始向量真 L2 距离复排"的通用实现，确保最终 Top-K 基于同一度量准则：
 
 - 开关与环境变量
   - 必需：`BASE_FBIN` 指向原始向量库（与构建一致的 `<base>.fbin`）。
@@ -881,7 +881,7 @@ BQ_GRAPH_THRESHOLD=2000 BQ_EF_SEARCH=128 BQ_SEEDS=8 ./demo/demo_test /path/to/qu
   - 已在脚本透传：`DiskANN/demo/scripts/search.sh`、`DiskANN/perf/demo_search_monitor.sh`。
 
 - 行为与内存占用
-  - 复排范围：对全部 f×k 候选进行真距计算与重排（不再依赖“仅前 M 个”）。
+  - 复排范围：对全部 f×k 候选进行真距计算与重排（不再依赖"仅前 M 个"）。
   - I/O 路径优先级：`pread(O_DIRECT, 对齐)` → `pread` → `mmap`（只读映射）。
   - 内存：不复制全量 base 数据；`mmap` 为文件页映射（RssFile），`pread` 仅用一个对齐缓冲复用（大小≈向量维度×4B）。整体内存占用与 DiskANN 行为对齐。
 
@@ -903,11 +903,11 @@ BQ_GRAPH_THRESHOLD=2000 BQ_EF_SEARCH=128 BQ_SEEDS=8 ./demo/demo_test /path/to/qu
   - 在大数据/冷数据场景下，`pread(O_DIRECT)` 复排更通用，且不引入额外内存开销。 
 
 #### 仅磁盘读优化（O_DIRECT 批量顺序读，禁用 mmap）
-为降低复排阶段的随机 I/O 抖动、提升 CPU 利用率，demo 在 O_DIRECT 路径实现了“按 gid 升序 + 段合并 + 单次对齐大块 pread”的纯磁盘读优化（不启用 mmap）：
+为降低复排阶段的随机 I/O 抖动、提升 CPU 利用率，demo 在 O_DIRECT 路径实现了"按 gid 升序 + 段合并 + 单次对齐大块 pread"的纯磁盘读优化（不启用 mmap）：
 
 - 原理
-  - 将候选的全局 ID（gid）按升序排序，基于 `.fbin` 行顺序布局将“随机小读”转化为“单调递增偏移的近顺序读”。
-  - 以“向量大小”为步长，合并“连续/近连续”的 gid 为顺序段；对每段使用一次对齐的大块 `pread`（`posix_memalign` 获取对齐缓冲），在内存中按指针偏移直接计算该段内多条向量距离。
+  - 将候选的全局 ID（gid）按升序排序，基于 `.fbin` 行顺序布局将"随机小读"转化为"单调递增偏移的近顺序读"。
+  - 以"向量大小"为步长，合并"连续/近连续"的 gid 为顺序段；对每段使用一次对齐的大块 `pread`（`posix_memalign` 获取对齐缓冲），在内存中按指针偏移直接计算该段内多条向量距离。
   - 若某段读失败或未对齐，自动回退为该段逐向量 `pread`（正确性不变）。
 
 - 环境变量（已在 `perf/demo/monitor.sh` 内置默认值，可按需覆盖）
@@ -931,7 +931,7 @@ RERANK_BATCH_VECS=256 RERANK_BATCH_MB=16 RERANK_GAP_GIDS=16 \
 - 预期效果
   - `read_IOPS` 显著下降（小随机读 → 少量大顺序读），`read_kbs` 更平滑、均值更高。
   - CPU 利用率回升（典型从 <200% 回升至 400%~700%+，取决于设备与并发）。
-  - 结果 Top-K 正确性不变：最终仍基于“真距排序”。
+  - 结果 Top-K 正确性不变：最终仍基于"真距排序"。
 
 - 兼容与边界
   - 该优化基于 `.fbin` 行顺序布局；若 `.fbin` 经特殊乱序打散，将退化为较多小段读（仍可逐向量兜底）。
@@ -939,7 +939,7 @@ RERANK_BATCH_VECS=256 RERANK_BATCH_MB=16 RERANK_GAP_GIDS=16 \
 
 #### 代码定位（便于查阅实现）
 - `demo/src/search.cpp`
-  - `search_two_stage(...)`：两阶段搜索主体；候选合并、去重、最终排序与“真距复排”入口逻辑（`BASE_FBIN` 分支）。
+  - `search_two_stage(...)`：两阶段搜索主体；候选合并、去重、最终排序与"真距复排"入口逻辑（`BASE_FBIN` 分支）。
   - `bq_graph_search(...)`：大桶 `bqgraph` 搜索与候选生成。
   - `load_bq_graph(...)`、`load_bq_bucket(...)`：读取 `bucket_*.bqgraph.bin` 与 `bucket_*.bq.bin` 的文件解析。
   - `IndexCache::get_non_blocking(...)`、`load_index(...)`：RAW 模式下按需加载 `bucket_*.vamana.index`（非阻塞缓存 + DiskANN 索引加载）。
@@ -952,7 +952,7 @@ RERANK_BATCH_VECS=256 RERANK_BATCH_MB=16 RERANK_GAP_GIDS=16 \
   - `demo/scripts/search.sh`、`perf/demo_search_monitor.sh`：提供 `BASE_FBIN` 与 `RERANK_O_DIRECT` 的默认配置与透传；一键运行与监控。 
 
 ### 7.11 缓解 I/O 波动的缓存优化（BQ 产物缓存 + 预热）
-为降低查询阶段“重复加载 BQ 产物（bq.bin/bqgraph）”导致的 I/O 抖动与内存锯齿，并让 CPU 更早进入稳定高并发，demo 在 BQ 模式下新增了轻量级缓存与可选预热功能：
+为降低查询阶段"重复加载 BQ 产物（bq.bin/bqgraph）"导致的 I/O 抖动与内存锯齿，并让 CPU 更早进入稳定高并发，demo 在 BQ 模式下新增了轻量级缓存与可选预热功能：
 
 - 缓存机制（非阻塞 LRU）
   - 缓存对象：
@@ -970,7 +970,7 @@ RERANK_BATCH_VECS=256 RERANK_BATCH_MB=16 RERANK_GAP_GIDS=16 \
 - 环境变量（程序端默认值与脚本示例）
   - `BQ_BUCKET_CACHE_MB`：小桶量化产物缓存预算（MB）。程序默认 256；perf 脚本默认 64
   - `BQ_GRAPH_CACHE_MB`：大桶图缓存预算（MB）。程序默认 256；perf 脚本默认 512
-  - `BQ_PREWARM_TOP`：预热的“最大桶”数量（0 表示不预热）。程序/脚本默认 0
+  - `BQ_PREWARM_TOP`：预热的"最大桶"数量（0 表示不预热）。程序/脚本默认 0
 
 - 快速使用示例（建议在 `build/` 下执行）
 ```bash
@@ -993,3 +993,42 @@ export RERANK_USE_MMAP=0
   - CPU 利用率在开始阶段更快上升，整体更接近硬件上限（例如 8 核目标 600%+）
 
 说明：以上缓存/预热仅在 BQ 模式生效；RAW 模式仍沿用 Vamana 子图与其独立的 Index 缓存策略。 
+
+### 7.12 线程池并行 I/O 与 libaio 异步 I/O（旧内核兼容）
+为降低复排阶段的 I/O 等待、提升 CPU 利用率，demo 提供三种磁盘读取策略，按优先级尝试：
+- io_uring 异步 I/O（需内核与 `liburing` 支持）
+- libaio 异步 I/O（旧内核常见，需 `libaio`）
+- 线程池并行 `pread`（跨平台通用）
+
+启用方式（建议在 `build/` 下运行）：
+```bash
+# 线程池并行 I/O（任务4）：
+export RERANK_IO_THREADS=8                # >1 启用，建议 4~8
+
+# 若系统支持 io_uring（现代内核）：
+export RERANK_IO_URING=1                  # 启用 io_uring
+export RERANK_URING_DEPTH=64              # 队列深度
+
+# 若系统不支持 io_uring，但支持 libaio（旧内核）：
+export RERANK_LIBAIO=1                    # 启用 libaio
+export RERANK_AIO_DEPTH=64                # 队列深度
+
+# 保持 O_DIRECT 顺序合并读取（推荐）
+export RERANK_O_DIRECT=1
+export RERANK_ALIGN_BS=4096
+export RERANK_BATCH_VECS=256
+export RERANK_BATCH_MB=16
+export RERANK_GAP_GIDS=16
+
+# 运行带监控脚本
+/home/danbai.wq/DiskANN/perf/demo/monitor.sh
+```
+行为说明：
+- 程序会先尝试已启用的"全异步"方案（io_uring > libaio），失败则回退到线程池并行 `pread`，再回退到原顺序读。
+- 三种方案均基于"gid 升序 + 段合并 + 对齐大块读取"，对齐失败或短读自动兜底，不影响正确性。
+- `monitor.sh` 会打印并透传上述环境变量，便于 A/B 与回退。
+
+注意：
+- io_uring 需内核支持；若构建启用但内核不支持，请设置 `RERANK_IO_URING=0` 或改用 `RERANK_LIBAIO=1`。
+- libaio 在多数老内核可用；需系统安装 `libaio` 和开发头文件。
+- 线程池方案跨平台通用，但受线程调度影响；优先选择全异步方案（libaio 或 io_uring）。

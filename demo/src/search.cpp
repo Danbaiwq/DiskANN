@@ -43,6 +43,11 @@ extern "C" {
 #include <liburing.h>
 }
 #endif
+#ifdef HAS_LIBAIO
+extern "C" {
+#include <libaio.h>
+}
+#endif
 
 // --- 简易 I/O 线程池（用于任务 4） ---
 class IOThreadPool {
@@ -845,48 +850,57 @@ QueryResult search_two_stage(
 
                     size_t skipped_oob = 0, short_reads = 0;
 
-                    // --- 任务 5：优先使用 io_uring（可选，需编译支持 + 环境变量） ---
+                    // --- 任务 5（替代）：libaio 异步 I/O（需要构建时检测 HAS_LIBAIO 且运行时启用） ---
                     bool used_engine = false;
-#ifdef HAS_IO_URING
+#ifdef HAS_LIBAIO
                     auto getenv_bool = [](const char* k, bool defv){ const char* s = std::getenv(k); if (!s) return defv; std::string v(s); return !(v=="0"||v=="false"||v=="False"); };
-                    bool want_uring = getenv_bool("RERANK_IO_URING", false);
-                    if (want_uring && !segments.empty()) {
-                        unsigned depth = static_cast<unsigned>(read_env_size_t("RERANK_URING_DEPTH", 64));
+                    bool want_aio = getenv_bool("RERANK_LIBAIO", false);
+                    if (want_aio && !segments.empty()) {
+                        unsigned depth = static_cast<unsigned>(read_env_size_t("RERANK_AIO_DEPTH", 64));
                         if (depth == 0) depth = 64;
-                        io_uring ring{};
-                        if (::io_uring_queue_init(depth, &ring, 0) == 0) {
+                        io_context_t ctx{};
+                        if (::io_setup(depth, &ctx) == 0) {
                             struct Ctx { void* buf; size_t aligned_len; size_t inner; uint32_t first_gid; uint32_t last_gid; };
                             std::vector<Ctx> ctxs(segments.size());
+                            std::vector<struct iocb> iocbs(segments.size());
+                            std::vector<struct iocb*> iocb_ptrs;
+                            iocb_ptrs.reserve(segments.size());
                             size_t submitted = 0, completed = 0;
-                            auto submit_one = [&](size_t i){
+                            size_t next_to_submit = 0;
+                            auto prep_one = [&](size_t i){
                                 const auto& seg = segments[i];
                                 void* big_buf = nullptr;
                                 if (posix_memalign(&big_buf, bs, seg.aligned_len) != 0 || big_buf == nullptr) return false;
                                 ctxs[i] = Ctx{big_buf, seg.aligned_len, seg.inner, seg.first_gid, seg.last_gid};
-                                io_uring_sqe* sqe = ::io_uring_get_sqe(&ring);
-                                if (!sqe) { free(big_buf); return false; }
-                                ::io_uring_prep_read(sqe, fd, big_buf, seg.aligned_len, seg.aligned_start);
-                                ::io_uring_sqe_set_data(sqe, &ctxs[i]);
-                                ++submitted;
+                                memset(&iocbs[i], 0, sizeof(struct iocb));
+                                io_prep_pread(&iocbs[i], fd, big_buf, seg.aligned_len, seg.aligned_start);
+                                iocb_ptrs.push_back(&iocbs[i]);
                                 return true;
                             };
-                            size_t in_flight = 0;
-                            size_t next_to_submit = 0;
-                            // 初始填满队列
-                            while (next_to_submit < segments.size() && in_flight < depth) {
-                                if (submit_one(next_to_submit)) { ++in_flight; }
+                            // 初始提交尽量多（不超过 depth）
+                            while (next_to_submit < segments.size() && (submitted - completed) < depth) {
+                                if (prep_one(next_to_submit)) { ++submitted; }
                                 ++next_to_submit;
                             }
-                            if (submitted > 0) { ::io_uring_submit(&ring); }
-                            while (completed < segments.size()) {
-                                io_uring_cqe* cqe = nullptr;
-                                if (::io_uring_wait_cqe(&ring, &cqe) != 0) break;
-                                Ctx* c = reinterpret_cast<Ctx*>(::io_uring_cqe_get_data(cqe));
-                                if (c && c->buf) {
-                                    if (cqe->res == static_cast<int>(c->aligned_len)) {
-                                        const char* base_ptr = static_cast<const char*>(c->buf) + c->inner;
-                                        for (uint32_t gid = c->first_gid; gid <= c->last_gid; ++gid) {
-                                            size_t rel = static_cast<size_t>(gid - c->first_gid);
+                            if (!iocb_ptrs.empty()) {
+                                long n = ::io_submit(ctx, static_cast<long>(iocb_ptrs.size()), iocb_ptrs.data());
+                                if (n < 0) { n = 0; }
+                                iocb_ptrs.clear();
+                            }
+                            while (completed < submitted) {
+                                struct io_event evs[128];
+                                long want = std::min<long>(128, submitted - completed);
+                                long got = ::io_getevents(ctx, 1, want, evs, nullptr);
+                                if (got < 0) break;
+                                for (long j = 0; j < got; ++j) {
+                                    // 找到对应的 iocb index
+                                    struct iocb* iocb = reinterpret_cast<struct iocb*>(evs[j].obj);
+                                    size_t idx = static_cast<size_t>(iocb - iocbs.data());
+                                    Ctx& c = ctxs[idx];
+                                    if (evs[j].res == static_cast<long>(c.aligned_len)) {
+                                        const char* base_ptr = static_cast<const char*>(c.buf) + c.inner;
+                                        for (uint32_t gid = c.first_gid; gid <= c.last_gid; ++gid) {
+                                            size_t rel = static_cast<size_t>(gid - c.first_gid);
                                             const float* vptr = reinterpret_cast<const float*>(base_ptr + rel * vec_bytes);
                                             float dist = 0.0f;
                                             for (size_t d = 0; d < base_dim; ++d) {
@@ -898,23 +912,96 @@ QueryResult search_two_stage(
                                     } else {
                                         short_reads++;
                                     }
-                                    free(c->buf);
+                                    if (c.buf) free(c.buf);
                                 }
-                                ::io_uring_cqe_seen(&ring, cqe);
-                                ++completed;
-                                if (next_to_submit < segments.size()) {
-                                    // 尝试继续提交
-                                    if (submit_one(next_to_submit)) { ::io_uring_submit(&ring); ++in_flight; }
+                                completed += static_cast<size_t>(got);
+                                // 继续补提交剩余 segments
+                                while (next_to_submit < segments.size() && (submitted - completed) < depth) {
+                                    if (prep_one(next_to_submit)) { ++submitted; }
                                     ++next_to_submit;
                                 }
+                                if (!iocb_ptrs.empty()) {
+                                    long n = ::io_submit(ctx, static_cast<long>(iocb_ptrs.size()), iocb_ptrs.data());
+                                    if (n < 0) { n = 0; }
+                                    iocb_ptrs.clear();
+                                }
                             }
-                            ::io_uring_queue_exit(&ring);
+                            ::io_destroy(ctx);
                             used_engine = !rerank_pairs.empty();
                         }
                     }
 #endif
 
-                    // --- 任务 4：I/O 线程池并行 pread（当未使用 io_uring 时） ---
+                    // --- 任务 5：优先使用 io_uring（若可用） ---
+                    if (!used_engine) {
+#ifdef HAS_IO_URING
+                        auto getenv_bool2 = [](const char* k, bool defv){ const char* s = std::getenv(k); if (!s) return defv; std::string v(s); return !(v=="0"||v=="false"||v=="False"); };
+                        bool want_uring = getenv_bool2("RERANK_IO_URING", false);
+                        if (want_uring && !segments.empty()) {
+                            unsigned depth = static_cast<unsigned>(read_env_size_t("RERANK_URING_DEPTH", 64));
+                            std::cout << "RERANK_URING_DEPTH: " << depth << std::endl;
+                            if (depth == 0) depth = 64;
+                            io_uring ring{};
+                            if (::io_uring_queue_init(depth, &ring, 0) == 0) {
+                                struct Ctx { void* buf; size_t aligned_len; size_t inner; uint32_t first_gid; uint32_t last_gid; };
+                                std::vector<Ctx> ctxs(segments.size());
+                                size_t submitted = 0, completed = 0;
+                                auto submit_one = [&](size_t i){
+                                    const auto& seg = segments[i];
+                                    void* big_buf = nullptr;
+                                    if (posix_memalign(&big_buf, bs, seg.aligned_len) != 0 || big_buf == nullptr) return false;
+                                    ctxs[i] = Ctx{big_buf, seg.aligned_len, seg.inner, seg.first_gid, seg.last_gid};
+                                    io_uring_sqe* sqe = ::io_uring_get_sqe(&ring);
+                                    if (!sqe) { free(big_buf); return false; }
+                                    ::io_uring_prep_read(sqe, fd, big_buf, seg.aligned_len, seg.aligned_start);
+                                    ::io_uring_sqe_set_data(sqe, &ctxs[i]);
+                                    ++submitted;
+                                    return true;
+                                };
+                                size_t in_flight = 0;
+                                size_t next_to_submit = 0;
+                                while (next_to_submit < segments.size() && in_flight < depth) {
+                                    if (submit_one(next_to_submit)) { ++in_flight; }
+                                    ++next_to_submit;
+                                }
+                                if (submitted > 0) { ::io_uring_submit(&ring); }
+                                while (completed < segments.size()) {
+                                    io_uring_cqe* cqe = nullptr;
+                                    if (::io_uring_wait_cqe(&ring, &cqe) != 0) break;
+                                    Ctx* c = reinterpret_cast<Ctx*>(::io_uring_cqe_get_data(cqe));
+                                    if (c && c->buf) {
+                                        if (cqe->res == static_cast<int>(c->aligned_len)) {
+                                            const char* base_ptr = static_cast<const char*>(c->buf) + c->inner;
+                                            for (uint32_t gid = c->first_gid; gid <= c->last_gid; ++gid) {
+                                                size_t rel = static_cast<size_t>(gid - c->first_gid);
+                                                const float* vptr = reinterpret_cast<const float*>(base_ptr + rel * vec_bytes);
+                                                float dist = 0.0f;
+                                                for (size_t d = 0; d < base_dim; ++d) {
+                                                    float diff = vptr[d] - query[d];
+                                                    dist += diff * diff;
+                                                }
+                                                rerank_pairs.emplace_back(dist, gid);
+                                            }
+                                        } else {
+                                            short_reads++;
+                                        }
+                                        free(c->buf);
+                                    }
+                                    ::io_uring_cqe_seen(&ring, cqe);
+                                    ++completed;
+                                    if (next_to_submit < segments.size()) {
+                                        if (submit_one(next_to_submit)) { ::io_uring_submit(&ring); ++in_flight; }
+                                        ++next_to_submit;
+                                    }
+                                }
+                                ::io_uring_queue_exit(&ring);
+                                used_engine = !rerank_pairs.empty();
+                            }
+                        }
+#endif
+                    }
+
+                    // --- 任务 4：I/O 线程池并行 pread（当未使用上面异步路径时） ---
                     if (!used_engine && !segments.empty()) {
                         size_t io_threads = read_env_size_t("RERANK_IO_THREADS", 0);
                         if (io_threads > 1) {
@@ -939,9 +1026,7 @@ QueryResult search_two_stage(
                                             }
                                             out.emplace_back(dist, gid);
                                         }
-                                    }
-                                    else {
-                                        // 兜底退回该段逐向量读取
+                                    } else {
                                         for (uint32_t gid = seg.first_gid; gid <= seg.last_gid; ++gid) {
                                             const off_t off = header_bytes + static_cast<off_t>(sizeof(float)) * static_cast<off_t>(gid) * static_cast<off_t>(base_dim);
                                             if (!read_vec_od(fd, off)) { continue; }
@@ -966,7 +1051,7 @@ QueryResult search_two_stage(
                         }
                     }
 
-                    // --- 原有顺序路径（作为最终兜底） ---
+                    // --- 原有顺序路径（兜底） ---
                     if (!used_engine) {
                         for (const auto& seg : segments) {
                             void* big_buf = nullptr;
