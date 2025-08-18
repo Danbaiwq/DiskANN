@@ -32,6 +32,67 @@
 #include <functional>
 #include <mutex>
 #include <atomic>
+#include <thread>
+#include <condition_variable>
+#include <future>
+#include <deque>
+#include <memory>
+
+#ifdef HAS_IO_URING
+extern "C" {
+#include <liburing.h>
+}
+#endif
+
+// --- 简易 I/O 线程池（用于任务 4） ---
+class IOThreadPool {
+public:
+    explicit IOThreadPool(size_t num_threads) : stop_(false) {
+        if (num_threads == 0) num_threads = 1;
+        for (size_t i = 0; i < num_threads; ++i) {
+            workers_.emplace_back([this]() {
+                for (;;) {
+                    std::function<void()> task;
+                    {
+                        std::unique_lock<std::mutex> lk(mtx_);
+                        cv_.wait(lk, [this]{ return stop_ || !tasks_.empty(); });
+                        if (stop_ && tasks_.empty()) return;
+                        task = std::move(tasks_.front());
+                        tasks_.pop_front();
+                    }
+                    task();
+                }
+            });
+        }
+    }
+    ~IOThreadPool() {
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            stop_ = true;
+        }
+        cv_.notify_all();
+        for (auto& t : workers_) { if (t.joinable()) t.join(); }
+    }
+
+    template <typename F>
+    auto submit(F&& f) -> std::future<typename std::invoke_result<F>::type> {
+        using R = typename std::invoke_result<F>::type;
+        auto p = std::make_shared<std::packaged_task<R()>>(std::forward<F>(f));
+        std::future<R> fut = p->get_future();
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            tasks_.emplace_back([p]{ (*p)(); });
+        }
+        cv_.notify_one();
+        return fut;
+    }
+private:
+    std::vector<std::thread> workers_;
+    std::deque<std::function<void()>> tasks_;
+    std::mutex mtx_;
+    std::condition_variable cv_;
+    bool stop_;
+};
 
 static inline std::string get_env_str_local(const char* key) {
     const char* v = std::getenv(key);
@@ -756,8 +817,10 @@ QueryResult search_two_stage(
                         gids.erase(std::unique(gids.begin(), gids.end()), gids.end());
                     }
 
-                    size_t skipped_oob = 0, short_reads = 0;
-                    // 分段合并：在 gap_gids、batch_vecs_limit、batch_bytes_limit 三个约束下，合并近邻 gid 为顺序段
+                    // 将 gid 合并为顺序段（segment）
+                    struct RerankSegment { off_t aligned_start; size_t inner; size_t aligned_len; uint32_t first_gid; uint32_t last_gid; };
+                    std::vector<RerankSegment> segments;
+                    segments.reserve(gids.size());
                     for (size_t sidx = 0; sidx < gids.size();) {
                         uint32_t first_gid = gids[sidx];
                         uint32_t last_gid = first_gid;
@@ -771,51 +834,176 @@ QueryResult search_two_stage(
                             last_gid = next_gid;
                             seg_last_index++;
                         }
-
                         size_t range_vecs = static_cast<size_t>(last_gid - first_gid + 1);
                         const off_t range_start_off = header_bytes + static_cast<off_t>(sizeof(float)) * static_cast<off_t>(first_gid) * static_cast<off_t>(base_dim);
                         off_t aligned_start = (range_start_off / static_cast<off_t>(bs)) * static_cast<off_t>(bs);
                         size_t inner = static_cast<size_t>(range_start_off - aligned_start);
                         size_t aligned_len = (inner + range_vecs * vec_bytes + (bs - 1)) & ~(bs - 1);
+                        segments.push_back(RerankSegment{aligned_start, inner, aligned_len, first_gid, last_gid});
+                        sidx = seg_last_index + 1;
+                    }
 
-                        void* big_buf = nullptr;
-                        bool segment_ok = false;
-                        if (posix_memalign(&big_buf, bs, aligned_len) == 0 && big_buf != nullptr) {
-                            ssize_t br = ::pread(fd, big_buf, aligned_len, aligned_start);
-                            if (br == static_cast<ssize_t>(aligned_len)) {
-                                const char* base_ptr = static_cast<const char*>(big_buf) + inner;
-                                for (size_t t = sidx; t <= seg_last_index; ++t) {
-                                    uint32_t gid = gids[t];
-                                    size_t rel = static_cast<size_t>(gid - first_gid);
-                                    const float* vptr = reinterpret_cast<const float*>(base_ptr + rel * vec_bytes);
+                    size_t skipped_oob = 0, short_reads = 0;
+
+                    // --- 任务 5：优先使用 io_uring（可选，需编译支持 + 环境变量） ---
+                    bool used_engine = false;
+#ifdef HAS_IO_URING
+                    auto getenv_bool = [](const char* k, bool defv){ const char* s = std::getenv(k); if (!s) return defv; std::string v(s); return !(v=="0"||v=="false"||v=="False"); };
+                    bool want_uring = getenv_bool("RERANK_IO_URING", false);
+                    if (want_uring && !segments.empty()) {
+                        unsigned depth = static_cast<unsigned>(read_env_size_t("RERANK_URING_DEPTH", 64));
+                        if (depth == 0) depth = 64;
+                        io_uring ring{};
+                        if (::io_uring_queue_init(depth, &ring, 0) == 0) {
+                            struct Ctx { void* buf; size_t aligned_len; size_t inner; uint32_t first_gid; uint32_t last_gid; };
+                            std::vector<Ctx> ctxs(segments.size());
+                            size_t submitted = 0, completed = 0;
+                            auto submit_one = [&](size_t i){
+                                const auto& seg = segments[i];
+                                void* big_buf = nullptr;
+                                if (posix_memalign(&big_buf, bs, seg.aligned_len) != 0 || big_buf == nullptr) return false;
+                                ctxs[i] = Ctx{big_buf, seg.aligned_len, seg.inner, seg.first_gid, seg.last_gid};
+                                io_uring_sqe* sqe = ::io_uring_get_sqe(&ring);
+                                if (!sqe) { free(big_buf); return false; }
+                                ::io_uring_prep_read(sqe, fd, big_buf, seg.aligned_len, seg.aligned_start);
+                                ::io_uring_sqe_set_data(sqe, &ctxs[i]);
+                                ++submitted;
+                                return true;
+                            };
+                            size_t in_flight = 0;
+                            size_t next_to_submit = 0;
+                            // 初始填满队列
+                            while (next_to_submit < segments.size() && in_flight < depth) {
+                                if (submit_one(next_to_submit)) { ++in_flight; }
+                                ++next_to_submit;
+                            }
+                            if (submitted > 0) { ::io_uring_submit(&ring); }
+                            while (completed < segments.size()) {
+                                io_uring_cqe* cqe = nullptr;
+                                if (::io_uring_wait_cqe(&ring, &cqe) != 0) break;
+                                Ctx* c = reinterpret_cast<Ctx*>(::io_uring_cqe_get_data(cqe));
+                                if (c && c->buf) {
+                                    if (cqe->res == static_cast<int>(c->aligned_len)) {
+                                        const char* base_ptr = static_cast<const char*>(c->buf) + c->inner;
+                                        for (uint32_t gid = c->first_gid; gid <= c->last_gid; ++gid) {
+                                            size_t rel = static_cast<size_t>(gid - c->first_gid);
+                                            const float* vptr = reinterpret_cast<const float*>(base_ptr + rel * vec_bytes);
+                                            float dist = 0.0f;
+                                            for (size_t d = 0; d < base_dim; ++d) {
+                                                float diff = vptr[d] - query[d];
+                                                dist += diff * diff;
+                                            }
+                                            rerank_pairs.emplace_back(dist, gid);
+                                        }
+                                    } else {
+                                        short_reads++;
+                                    }
+                                    free(c->buf);
+                                }
+                                ::io_uring_cqe_seen(&ring, cqe);
+                                ++completed;
+                                if (next_to_submit < segments.size()) {
+                                    // 尝试继续提交
+                                    if (submit_one(next_to_submit)) { ::io_uring_submit(&ring); ++in_flight; }
+                                    ++next_to_submit;
+                                }
+                            }
+                            ::io_uring_queue_exit(&ring);
+                            used_engine = !rerank_pairs.empty();
+                        }
+                    }
+#endif
+
+                    // --- 任务 4：I/O 线程池并行 pread（当未使用 io_uring 时） ---
+                    if (!used_engine && !segments.empty()) {
+                        size_t io_threads = read_env_size_t("RERANK_IO_THREADS", 0);
+                        if (io_threads > 1) {
+                            IOThreadPool pool(io_threads);
+                            std::vector<std::future<std::vector<std::pair<float, uint32_t>>>> futs;
+                            futs.reserve(segments.size());
+                            for (const auto& seg : segments) {
+                                futs.emplace_back(pool.submit([&, seg]() {
+                                    std::vector<std::pair<float, uint32_t>> out;
+                                    void* big_buf = nullptr;
+                                    if (posix_memalign(&big_buf, bs, seg.aligned_len) != 0 || big_buf == nullptr) return out;
+                                    ssize_t br = ::pread(fd, big_buf, seg.aligned_len, seg.aligned_start);
+                                    if (br == static_cast<ssize_t>(seg.aligned_len)) {
+                                        const char* base_ptr = static_cast<const char*>(big_buf) + seg.inner;
+                                        for (uint32_t gid = seg.first_gid; gid <= seg.last_gid; ++gid) {
+                                            size_t rel = static_cast<size_t>(gid - seg.first_gid);
+                                            const float* vptr = reinterpret_cast<const float*>(base_ptr + rel * vec_bytes);
+                                            float dist = 0.0f;
+                                            for (size_t d = 0; d < base_dim; ++d) {
+                                                float diff = vptr[d] - query[d];
+                                                dist += diff * diff;
+                                            }
+                                            out.emplace_back(dist, gid);
+                                        }
+                                    }
+                                    else {
+                                        // 兜底退回该段逐向量读取
+                                        for (uint32_t gid = seg.first_gid; gid <= seg.last_gid; ++gid) {
+                                            const off_t off = header_bytes + static_cast<off_t>(sizeof(float)) * static_cast<off_t>(gid) * static_cast<off_t>(base_dim);
+                                            if (!read_vec_od(fd, off)) { continue; }
+                                            float dist = 0.0f;
+                                            for (size_t d = 0; d < base_dim; ++d) {
+                                                float diff = buf[d] - query[d];
+                                                dist += diff * diff;
+                                            }
+                                            out.emplace_back(dist, gid);
+                                        }
+                                    }
+                                    if (big_buf) free(big_buf);
+                                    return out;
+                                }));
+                            }
+                            for (auto& f : futs) {
+                                auto v = f.get();
+                                if (v.empty()) { short_reads++; }
+                                rerank_pairs.insert(rerank_pairs.end(), v.begin(), v.end());
+                            }
+                            used_engine = !rerank_pairs.empty();
+                        }
+                    }
+
+                    // --- 原有顺序路径（作为最终兜底） ---
+                    if (!used_engine) {
+                        for (const auto& seg : segments) {
+                            void* big_buf = nullptr;
+                            bool segment_ok = false;
+                            if (posix_memalign(&big_buf, bs, seg.aligned_len) == 0 && big_buf != nullptr) {
+                                ssize_t br = ::pread(fd, big_buf, seg.aligned_len, seg.aligned_start);
+                                if (br == static_cast<ssize_t>(seg.aligned_len)) {
+                                    const char* base_ptr = static_cast<const char*>(big_buf) + seg.inner;
+                                    for (uint32_t gid = seg.first_gid; gid <= seg.last_gid; ++gid) {
+                                        size_t rel = static_cast<size_t>(gid - seg.first_gid);
+                                        const float* vptr = reinterpret_cast<const float*>(base_ptr + rel * vec_bytes);
+                                        float dist = 0.0f;
+                                        for (size_t d = 0; d < base_dim; ++d) {
+                                            float diff = vptr[d] - query[d];
+                                            dist += diff * diff;
+                                        }
+                                        rerank_pairs.emplace_back(dist, gid);
+                                    }
+                                    segment_ok = true;
+                                }
+                            }
+                            if (big_buf) free(big_buf);
+                            if (!segment_ok) {
+                                for (uint32_t gid = seg.first_gid; gid <= seg.last_gid; ++gid) {
+                                    const off_t off = header_bytes + static_cast<off_t>(sizeof(float)) * static_cast<off_t>(gid) * static_cast<off_t>(base_dim);
+                                    if (!read_vec_od(fd, off)) { short_reads++; continue; }
                                     float dist = 0.0f;
                                     for (size_t d = 0; d < base_dim; ++d) {
-                                        float diff = vptr[d] - query[d];
+                                        float diff = buf[d] - query[d];
                                         dist += diff * diff;
                                     }
                                     rerank_pairs.emplace_back(dist, gid);
                                 }
-                                segment_ok = true;
                             }
                         }
-                        if (big_buf) free(big_buf);
-
-                        if (!segment_ok) {
-                            // 兜底：该段退回逐向量读取
-                            for (size_t t = sidx; t <= seg_last_index; ++t) {
-                                uint32_t gid = gids[t];
-                                const off_t off = header_bytes + static_cast<off_t>(sizeof(float)) * static_cast<off_t>(gid) * static_cast<off_t>(base_dim);
-                                if (!read_vec_od(fd, off)) { short_reads++; continue; }
-                                float dist = 0.0f;
-                                for (size_t d = 0; d < base_dim; ++d) {
-                                    float diff = buf[d] - query[d];
-                                    dist += diff * diff;
-                                }
-                                rerank_pairs.emplace_back(dist, gid);
-                            }
-                        }
-                        sidx = seg_last_index + 1;
                     }
+
                     if (sv_buf) { free(sv_buf); }
                     if (!rerank_pairs.empty()) {
                         std::sort(rerank_pairs.begin(), rerank_pairs.end());

@@ -27,3 +27,15 @@ include_directories(/home/danbai.wq/DiskANN/rabitq/rabitqlib)
 
 # Add compiler flags for AVX2 and FMA support for performance
 target_compile_options(demo_test PRIVATE -mavx2 -mfma)
+
+# Optional: liburing (for io_uring async I/O)
+find_path(URING_INCLUDE_DIR liburing.h PATHS /usr/include /usr/local/include)
+find_library(URING_LIB uring PATHS /usr/lib /usr/local/lib /usr/lib64 /usr/local/lib64)
+if (URING_INCLUDE_DIR AND URING_LIB)
+    message(STATUS "[Demo] Found liburing: ${URING_LIB}")
+    target_compile_definitions(demo_test PRIVATE HAS_IO_URING=1)
+    target_include_directories(demo_test PRIVATE ${URING_INCLUDE_DIR})
+    target_link_libraries(demo_test PRIVATE ${URING_LIB})
+else()
+    message(STATUS "[Demo] liburing not found; io_uring disabled")
+endif()

@@ -39,9 +39,14 @@ BQ_PREWARM_TOP="${BQ_PREWARM_TOP:-0}"
 
 # 新增：复排 O_DIRECT 读优化参数（仅磁盘读，不启用 mmap）
 RERANK_ALIGN_BS="${RERANK_ALIGN_BS:-4096}"       # 对齐粒度（字节），建议 4096；自动兼容 >=512
-RERANK_BATCH_VECS="${RERANK_BATCH_VECS:-128}"    # 每段最大向量数
-RERANK_BATCH_MB="${RERANK_BATCH_MB:-8}"          # 每段最大读取字节数（MB）
-RERANK_GAP_GIDS="${RERANK_GAP_GIDS:-8}"          # 合并段允许的 gid 间隙（行数）
+RERANK_BATCH_VECS="${RERANK_BATCH_VECS:-256}"    # 每段最大向量数
+RERANK_BATCH_MB="${RERANK_BATCH_MB:-16}"          # 每段最大读取字节数（MB）
+RERANK_GAP_GIDS="${RERANK_GAP_GIDS:-16}"          # 合并段允许的 gid 间隙（行数）
+
+# 新增：并行与异步 I/O 参数（任务 4 & 任务 5）
+RERANK_IO_THREADS="${RERANK_IO_THREADS:-8}"       # >1 启用线程池并行 pread（如 4/8）
+RERANK_IO_URING="${RERANK_IO_URING:-1}"           # 1 启用 io_uring 异步 I/O（需 liburing）
+RERANK_URING_DEPTH="${RERANK_URING_DEPTH:-64}"    # io_uring 队列深度
 # =====================================
 
 # 基本校验
@@ -76,6 +81,9 @@ cat <<EOF
 [demo search] RERANK_BATCH_VECS  : $RERANK_BATCH_VECS
 [demo search] RERANK_BATCH_MB    : $RERANK_BATCH_MB
 [demo search] RERANK_GAP_GIDS    : $RERANK_GAP_GIDS
+[demo search] RERANK_IO_THREADS  : $RERANK_IO_THREADS
+[demo search] RERANK_IO_URING    : $RERANK_IO_URING
+[demo search] RERANK_URING_DEPTH : $RERANK_URING_DEPTH
 EOF
 
 # 确保绘图不阻塞（monitor_process.py 内已支持 PLOT_SHOW 环境开关）
@@ -96,6 +104,9 @@ RERANK_ALIGN_BS="$RERANK_ALIGN_BS" \
 RERANK_BATCH_VECS="$RERANK_BATCH_VECS" \
 RERANK_BATCH_MB="$RERANK_BATCH_MB" \
 RERANK_GAP_GIDS="$RERANK_GAP_GIDS" \
+RERANK_IO_THREADS="$RERANK_IO_THREADS" \
+RERANK_IO_URING="$RERANK_IO_URING" \
+RERANK_URING_DEPTH="$RERANK_URING_DEPTH" \
 "$DEMO_BIN" "$QUERY_FBIN" "$GROUNDTRUTH_IVECS" &
 
 PID=$!
