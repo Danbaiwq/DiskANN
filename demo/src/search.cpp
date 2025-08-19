@@ -992,6 +992,11 @@ QueryResult search_two_stage(
                         if (depth == 0) depth = 64;
                         io_context_t ctx{};
                         if (::io_setup(depth, &ctx) == 0) {
+                            size_t num_threads = read_env_size_t("RERANK_IO_THREADS", 0);
+                            if (num_threads == 0) num_threads = std::thread::hardware_concurrency();
+                            IOThreadPool pool(num_threads > 1 ? num_threads : 2);
+                            std::vector<std::future<std::vector<std::pair<float, uint32_t>>>> futs;
+
                             struct Ctx { void* buf; size_t aligned_len; size_t inner; uint32_t first_gid; uint32_t last_gid; };
                             std::vector<Ctx> ctxs(segments.size());
                             std::vector<struct iocb> iocbs(segments.size());
@@ -1022,28 +1027,35 @@ QueryResult search_two_stage(
                             while (completed < submitted) {
                                 struct io_event evs[128];
                                 long want = std::min<long>(128, submitted - completed);
-                                long got = ::io_getevents(ctx, 1, want, evs, nullptr);
+                                long min_reap_batch = static_cast<long>(depth / 4);
+                                if (min_reap_batch == 0) min_reap_batch = 1;
+                                long min_nr_to_wait = std::min((long)(submitted - completed), min_reap_batch);
+                                long got = ::io_getevents(ctx, min_nr_to_wait, want, evs, nullptr);
                                 if (got < 0) break;
                                 for (long j = 0; j < got; ++j) {
-                                    // 找到对应的 iocb index
                                     struct iocb* iocb = reinterpret_cast<struct iocb*>(evs[j].obj);
                                     size_t idx = static_cast<size_t>(iocb - iocbs.data());
                                     Ctx& c = ctxs[idx];
                                     if (evs[j].res == static_cast<long>(c.aligned_len)) {
-                                        const char* base_ptr = static_cast<const char*>(c.buf) + c.inner;
-                                        for (uint32_t gid = c.first_gid; gid <= c.last_gid; ++gid) {
-                                            size_t rel = static_cast<size_t>(gid - c.first_gid);
-                                            const float* vptr = reinterpret_cast<const float*>(base_ptr + rel * vec_bytes);
-                                            float dist = l2_distance_sqr_avx2_opt(vptr, query.data(), base_dim);
-                                            rerank_pairs.emplace_back(dist, gid);
-                                        }
+                                        futs.emplace_back(pool.submit([buf = c.buf, inner = c.inner, first_gid = c.first_gid, last_gid = c.last_gid, vec_bytes, base_dim, &query]() {
+                                            std::unique_ptr<void, decltype(&free)> guard(buf, &free);
+                                            std::vector<std::pair<float, uint32_t>> local_results;
+                                            local_results.reserve(last_gid - first_gid + 1);
+                                            const char* base_ptr = static_cast<const char*>(buf) + inner;
+                                            for (uint32_t gid = first_gid; gid <= last_gid; ++gid) {
+                                                size_t rel = static_cast<size_t>(gid - first_gid);
+                                                const float* vptr = reinterpret_cast<const float*>(base_ptr + rel * vec_bytes);
+                                                float dist = l2_distance_sqr_avx2_opt(vptr, query.data(), base_dim);
+                                                local_results.emplace_back(dist, gid);
+                                            }
+                                            return local_results;
+                                        }));
                                     } else {
                                         short_reads++;
+                                        if (c.buf) free(c.buf);
                                     }
-                                    if (c.buf) free(c.buf);
                                 }
                                 completed += static_cast<size_t>(got);
-                                // 继续补提交剩余 segments
                                 while (next_to_submit < segments.size() && (submitted - completed) < depth) {
                                     if (prep_one(next_to_submit)) { ++submitted; }
                                     ++next_to_submit;
@@ -1055,6 +1067,11 @@ QueryResult search_two_stage(
                                 }
                             }
                             ::io_destroy(ctx);
+
+                            for (auto& f : futs) {
+                                auto p = f.get();
+                                rerank_pairs.insert(rerank_pairs.end(), p.begin(), p.end());
+                            }
                             used_engine = !rerank_pairs.empty();
                         }
                     }

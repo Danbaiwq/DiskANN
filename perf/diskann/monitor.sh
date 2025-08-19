@@ -7,11 +7,11 @@
   --index_path_prefix /data/1/perf/diskann/disk_index_gist_base_R32_L50_A1.2 \
   --query_file /home/danbai.wq/DiskANN/build/data/gist_query.fbin \
   --gt_file /home/danbai.wq/DiskANN/build/data/gist_query_base_gt100 \
-  -K 10 \
+  -K 100 \
   -L 200 400 600 800 1000 1200 1400\
   --result_path /home/danbai.wq/DiskANN/build/data/res \
   --num_nodes_to_cache 100000 \
-  -W 16 \
+  -W 32 \
   -T 32 &
 
 # 获取刚启动的子进程 PID

@@ -31,9 +31,13 @@ BQ_SEEDS="${BQ_SEEDS:-8}"                       # bqgraph 的入口点数
 # 是否允许 mmap 回退（默认关闭，保持与 DiskANN fastscan
 RERANK_USE_MMAP="${RERANK_USE_MMAP:-0}"
 
+# 新增：查询参数 F 与 K
+DEMO_F_PARAM="${DEMO_F_PARAM:-3}"
+DEMO_K_PARAM="${DEMO_K_PARAM:-500}"
+
 # 新增：BQ 缓存内存预算（MB）
 BQ_BUCKET_CACHE_MB="${BQ_BUCKET_CACHE_MB:-64}"
-BQ_GRAPH_CACHE_MB="${BQ_GRAPH_CACHE_MB:-512}"
+BQ_GRAPH_CACHE_MB="${BQ_GRAPH_CACHE_MB:-384}"
 # 新增：预热前 N 个最大桶（按桶大小排序，0 表示不预热）
 BQ_PREWARM_TOP="${BQ_PREWARM_TOP:-0}"
 
@@ -44,12 +48,12 @@ RERANK_BATCH_MB="${RERANK_BATCH_MB:-32}"          # 每段最大读取字节数�
 RERANK_GAP_GIDS="${RERANK_GAP_GIDS:-16}"          # 合并段允许的 gid 间隙（行数）
 
 # 新增：并行与异步 I/O 参数（任务 4 & 任务 5）
-RERANK_IO_THREADS="${RERANK_IO_THREADS:-8}"       # >1 启用线程池并行 pread（如 4/8）
+RERANK_IO_THREADS="${RERANK_IO_THREADS:-16}"       # >1 启用线程池并行 pread（如 4/8）和libaio的线程池
 RERANK_IO_URING="${RERANK_IO_URING:-0}"           # 1 启用 io_uring 异步 I/O（需 liburing）
 RERANK_URING_DEPTH="${RERANK_URING_DEPTH:-128}"    # io_uring 队列深度
 # 新增：libaio 异步 I/O（兼容旧内核）
 RERANK_LIBAIO="${RERANK_LIBAIO:-0}"               # 1 启用 libaio（需 libaio）
-RERANK_AIO_DEPTH="${RERANK_AIO_DEPTH:-128}"        # libaio 队列深度
+RERANK_AIO_DEPTH="${RERANK_AIO_DEPTH:-256}"        # libaio 队列深度
 # =====================================
 
 # 基本校验
@@ -89,6 +93,8 @@ cat <<EOF
 [demo search] RERANK_URING_DEPTH : $RERANK_URING_DEPTH
 [demo search] RERANK_LIBAIO      : $RERANK_LIBAIO
 [demo search] RERANK_AIO_DEPTH   : $RERANK_AIO_DEPTH
+[demo search] DEMO_F_PARAM       : $DEMO_F_PARAM
+[demo search] DEMO_K_PARAM       : $DEMO_K_PARAM
 EOF
 
 # 确保绘图不阻塞（monitor_process.py 内已支持 PLOT_SHOW 环境开关）
@@ -114,6 +120,8 @@ RERANK_IO_URING="$RERANK_IO_URING" \
 RERANK_URING_DEPTH="$RERANK_URING_DEPTH" \
 RERANK_LIBAIO="$RERANK_LIBAIO" \
 RERANK_AIO_DEPTH="$RERANK_AIO_DEPTH" \
+DEMO_F_PARAM="$DEMO_F_PARAM" \
+DEMO_K_PARAM="$DEMO_K_PARAM" \
 "$DEMO_BIN" "$QUERY_FBIN" "$GROUNDTRUTH_IVECS" &
 
 PID=$!

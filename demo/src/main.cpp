@@ -50,6 +50,17 @@ static inline std::string resolve_read_path(const std::string& name) {
     return join_path(in_dir, name);
 }
 
+static inline int get_env_int(const char* key, int default_val) {
+    const char* v = std::getenv(key);
+    if (v == nullptr) return default_val;
+    try {
+        int val = std::stoi(v);
+        return val;
+    } catch (const std::exception& e) {
+        return default_val;
+    }
+}
+
 void build_mode(const std::string& data_path) {
     std::cout << "\n--- Running in BUILD mode ---" << std::endl;
 
@@ -59,8 +70,8 @@ void build_mode(const std::string& data_path) {
     const int t = 8;
     const int l = 3;
     const float beta = 1.02f;  // 新增：距离比例约束参数
-    const size_t graph_degree = 32;
-    const size_t build_complexity = 50;
+    const size_t graph_degree = 64;
+    const size_t build_complexity = 128;
 
     // bq 开关与bits（默认从环境变量读取，不存在则默认关闭bq）
     bool use_bq = false;
@@ -272,8 +283,8 @@ void search_mode(const std::string& query_path, const std::string& gt_path) {
     std::cout << "\n--- Running in SEARCH mode ---" << std::endl;
 
     // --- Parameters ---
-    const int f = 4; // Number of buckets to search
-    const int k = 100; // Number of neighbors to retrieve per bucket
+    const int f = get_env_int("DEMO_F_PARAM", 6); // Number of buckets to search
+    const int k = get_env_int("DEMO_K_PARAM", 25); // Number of neighbors to retrieve per bucket
     const int num_threads = std::thread::hardware_concurrency();
 
     // --- Load metadata ---
@@ -395,10 +406,8 @@ void search_mode(const std::string& query_path, const std::string& gt_path) {
 
 
 int main(int argc, char** argv) {
-    if (argc != 2 && argc != 3) {
-        std::cout << "Usage: " << std::endl;
-        std::cout << "  Build Mode: " << argv[0] << " <base.fbin>" << std::endl;
-        std::cout << "  Search Mode: " << argv[0] << " <query.fbin> <ground_truth.ivecs>" << std::endl;
+    if (argc < 1 || argc > 3) {
+        std::cerr << "Usage: " << argv[0] << " <query_file.fbin> <ground_truth.ivecs>" << std::endl;
         return 1;
     }
 
