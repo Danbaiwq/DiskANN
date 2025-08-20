@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # =====================================
-# Demo 构建脚本（直接在下方“用户配置区”修改配置）
+# Demo 构建脚本（直接在下方"用户配置区"修改配置）
 # 运行：
 #   ./build.sh
 # =====================================
@@ -24,6 +24,11 @@ USE_BQ="${USE_BQ:-1}"                 # 1 启用 BQ 模式；0 构 raw 的 bucke
 BQ_BITS="${BQ_BITS:-4}"                # 量化比特总数
 BQ_GRAPH_THRESHOLD="${BQ_GRAPH_THRESHOLD:-8000}"  # >= 阈值构 bqgraph，否则 bq.bin
 BQ_SATURATE_PASS="${BQ_SATURATE_PASS:-1}"        # 轻量互连/饱和微修复（度不增）
+
+# 新增：构图量化模式（仅在 USE_BQ=1 时生效）
+# 可选值：bq (使用BQ向量构图), sq (使用SQ向量构图), no_quantization (使用全精度向量构图)
+# 注意：无论使用哪种模式，最终保存的图都是 BQ 压缩格式
+CONSTRUCT_QUANTIZATION="${CONSTRUCT_QUANTIZATION:-no_quantization}"
 # =====================================
 
 # 基本校验
@@ -47,6 +52,7 @@ cat <<EOF
 [demo build] BQ_BITS              : $BQ_BITS
 [demo build] BQ_GRAPH_THRESHOLD   : $BQ_GRAPH_THRESHOLD
 [demo build] BQ_SATURATE_PASS     : $BQ_SATURATE_PASS
+[demo build] CONSTRUCT_QUANTIZATION: $CONSTRUCT_QUANTIZATION
 EOF
 
 # 运行构建
@@ -55,6 +61,7 @@ USE_BQ="$USE_BQ" \
 BQ_BITS="$BQ_BITS" \
 BQ_GRAPH_THRESHOLD="$BQ_GRAPH_THRESHOLD" \
 BQ_SATURATE_PASS="$BQ_SATURATE_PASS" \
+CONSTRUCT_QUANTIZATION="$CONSTRUCT_QUANTIZATION" \
 "$DEMO_BIN" "$BASE_FBIN"
 
 echo "[demo build] artifacts written to: $OUTPUT_DIR" 

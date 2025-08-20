@@ -32,12 +32,12 @@ BQ_SEEDS="${BQ_SEEDS:-8}"                       # bqgraph 的入口点数
 RERANK_USE_MMAP="${RERANK_USE_MMAP:-0}"
 
 # 新增：查询参数 F 与 K
-DEMO_F_PARAM="${DEMO_F_PARAM:-3}"
-DEMO_K_PARAM="${DEMO_K_PARAM:-500}"
+DEMO_F_PARAM="${DEMO_F_PARAM:-2}"
+DEMO_K_PARAM="${DEMO_K_PARAM:-100}"
 
 # 新增：BQ 缓存内存预算（MB）
-BQ_BUCKET_CACHE_MB="${BQ_BUCKET_CACHE_MB:-64}"
-BQ_GRAPH_CACHE_MB="${BQ_GRAPH_CACHE_MB:-384}"
+BQ_BUCKET_CACHE_MB="${BQ_BUCKET_CACHE_MB:-128}"
+BQ_GRAPH_CACHE_MB="${BQ_GRAPH_CACHE_MB:-400}"
 # 新增：预热前 N 个最大桶（按桶大小排序，0 表示不预热）
 BQ_PREWARM_TOP="${BQ_PREWARM_TOP:-0}"
 
@@ -54,6 +54,9 @@ RERANK_URING_DEPTH="${RERANK_URING_DEPTH:-128}"    # io_uring 队列深度
 # 新增：libaio 异步 I/O（兼容旧内核）
 RERANK_LIBAIO="${RERANK_LIBAIO:-0}"               # 1 启用 libaio（需 libaio）
 RERANK_AIO_DEPTH="${RERANK_AIO_DEPTH:-256}"        # libaio 队列深度
+
+# 新增：提示构建时使用的模式（虽然搜索时不需要，但帮助用户了解）
+CONSTRUCT_QUANTIZATION="${CONSTRUCT_QUANTIZATION:-bq}"  # 仅用于展示
 # =====================================
 
 # 基本校验

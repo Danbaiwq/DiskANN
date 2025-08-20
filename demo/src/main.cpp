@@ -66,9 +66,9 @@ void build_mode(const std::string& data_path) {
 
     // --- Parameters ---
     const float alpha = 0.01f;
-    const size_t m = 1024;
+    const size_t m = 512;
     const int t = 8;
-    const int l = 3;
+    const int l = 5;
     const float beta = 1.02f;  // 新增：距离比例约束参数
     const size_t graph_degree = 64;
     const size_t build_complexity = 128;
@@ -83,6 +83,26 @@ void build_mode(const std::string& data_path) {
         bq_bits = std::max<size_t>(1, std::min<size_t>(8, std::stoul(envb)));
     }
     
+    // 新增：构图量化模式
+    ConstructQuantization construct_mode = ConstructQuantization::BQ;
+    if (use_bq) {
+        if (const char* env_cq = std::getenv("CONSTRUCT_QUANTIZATION")) {
+            std::string mode(env_cq);
+            if (mode == "sq" || mode == "SQ") {
+                construct_mode = ConstructQuantization::SQ;
+                std::cout << "Using SQ quantization for graph construction" << std::endl;
+            } else if (mode == "no_quantization" || mode == "NO_QUANTIZATION") {
+                construct_mode = ConstructQuantization::NO_QUANTIZATION;
+                std::cout << "Using full precision vectors for graph construction" << std::endl;
+            } else if (mode == "bq" || mode == "BQ") {
+                construct_mode = ConstructQuantization::BQ;
+                std::cout << "Using BQ quantization for graph construction (default)" << std::endl;
+            } else {
+                std::cout << "Unknown CONSTRUCT_QUANTIZATION mode: " << mode << ", using BQ as default" << std::endl;
+            }
+        }
+    }
+    
     // 获取可用线程数，但为每个索引构建留一些余量
     const size_t max_threads = std::thread::hardware_concurrency();
     const size_t threads_per_build = std::max(1UL, max_threads / 2);  // 每个索引构建使用一半的线程
@@ -90,6 +110,15 @@ void build_mode(const std::string& data_path) {
     std::cout << "Using " << threads_per_build << " threads per index build (total CPU cores: " << max_threads << ")" << std::endl;
     std::cout << "Distance constraint parameter beta: " << beta << std::endl;
     std::cout << "bq mode: " << (use_bq ? "ON" : "OFF") << ", bits=" << bq_bits << std::endl;
+    if (use_bq) {
+        std::cout << "Construction quantization mode: ";
+        switch (construct_mode) {
+            case ConstructQuantization::BQ: std::cout << "BQ"; break;
+            case ConstructQuantization::SQ: std::cout << "SQ"; break;
+            case ConstructQuantization::NO_QUANTIZATION: std::cout << "NO_QUANTIZATION"; break;
+        }
+        std::cout << std::endl;
+    }
 
     auto build_start_time = std::chrono::high_resolution_clock::now();
     // --- Load Data ---
@@ -183,7 +212,11 @@ void build_mode(const std::string& data_path) {
     build_and_save_vamana_graph(final_centroids, {}, resolve_write_path("medoid_vamana.index"), graph_degree, build_complexity, threads_per_build);
 
     // --- Build Bucket Vamana Graphs (bucket间并行构建) ---
-    const size_t MIN_BUCKET_SIZE_FOR_INDEX = 100;
+    size_t bq_graph_threshold = 1000;
+    if (const char* env_thr = std::getenv("BQ_GRAPH_THRESHOLD")) {
+        try { bq_graph_threshold = std::stoul(env_thr); } catch (...) {}
+    }
+    const size_t MIN_BUCKET_SIZE_FOR_INDEX = 1; // 始终为小桶构建量化文件，阈值仅用于选择 graph/bin
     std::cout << "Building and saving Vamana graphs for each bucket..." << std::endl;
     
     // 计算合理的并行度
@@ -234,14 +267,10 @@ void build_mode(const std::string& data_path) {
             build_and_save_vamana_graph(bucket_data, {}, bucket_graph_path, graph_degree, build_complexity, threads_per_bucket);
         } else {
             // 读取 BQ_GRAPH_THRESHOLD 环境变量，默认 1000
-            size_t bq_graph_threshold = 1000;
-            if (const char* env_thr = std::getenv("BQ_GRAPH_THRESHOLD")) {
-                try { bq_graph_threshold = std::stoul(env_thr); } catch (...) {}
-            }
             size_t padded_dim = (dim + 3) / 4 * 4;
             if (buckets[i].size() >= bq_graph_threshold) {
                 std::string gpath = resolve_write_path("bucket_" + std::to_string(i) + "_bqgraph.bin");
-                BQBuildConfig cfg{ padded_dim, bq_bits, graph_degree, build_complexity, 1.2f };
+                BQBuildConfig cfg{ padded_dim, bq_bits, graph_degree, build_complexity, 1.2f, construct_mode };
                 build_large_bucket_bqgraph(i, bucket_data, final_centroids[i], cfg, gpath);
             } else {
                 std::string bq_path = resolve_write_path("bucket_" + std::to_string(i) + "_bq.bin");
