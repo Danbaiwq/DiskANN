@@ -874,6 +874,8 @@ QueryResult search_two_stage(
     std::sort(candidates.begin(), candidates.end());
 
     {
+        // 调试：打印用于复排的候选数量
+        std::cout << "[debug] candidates for rerank: " << candidates.size() << std::endl;
         const char* base_fbin_env = std::getenv("BASE_FBIN");
         if (base_fbin_env && base_fbin_env[0] != '\0' && !candidates.empty() && top_k > 0) {
             std::string base_fbin_path(base_fbin_env);

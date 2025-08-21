@@ -66,7 +66,7 @@ void build_mode(const std::string& data_path) {
 
     // --- Parameters ---
     const float alpha = 0.01f;
-    const size_t m = 512;
+    const size_t m = 1024;
     const int t = 8;
     const int l = 5;
     const float beta = 1.02f;  // 新增：距离比例约束参数
@@ -131,7 +131,8 @@ void build_mode(const std::string& data_path) {
 
     // --- K-means Clustering ---
     std::cout << "Starting K-means clustering (t=" << t << ", m=" << m << ")..." << std::endl;
-    DataSet final_centroids(m, DataPoint(dim, 0.0f));
+    // 收集 t 次 mini-batch 的 m 个中心，总计 t*m 个候选中心
+    DataSet all_centroids; all_centroids.reserve(static_cast<size_t>(t) * m);
     #pragma omp parallel for
     for (int i = 0; i < t; ++i) {
         DataSet sampled_data = sample_data(full_dataset_flat, num_points, dim, alpha);
@@ -139,16 +140,14 @@ void build_mode(const std::string& data_path) {
         DataSet centroids = kmeans_lloyds(sampled_data, m, initial_centroids, 100);
         #pragma omp critical
         {
-            for (size_t j = 0; j < m; ++j) {
-                if(j < centroids.size()){
-                    for (size_t k = 0; k < dim; ++k) {
-                        final_centroids[j][k] += centroids[j][k];
-                    }
-                }
+            for (size_t j = 0; j < centroids.size(); ++j) {
+                all_centroids.push_back(centroids[j]);
             }
         }
     }
-    for(size_t i = 0; i < m; ++i) { for(size_t j = 0; j < dim; ++j) { final_centroids[i][j] /= t; } }
+    // 在 t*m 个中心上再聚成最终 m 个中心
+    DataSet init2 = kmeans_plusplus_init(all_centroids, m);
+    DataSet final_centroids = kmeans_lloyds(all_centroids, m, init2, 100);
     
     // --- 优化的数据分桶策略 (基于距离比例约束) ---
     std::cout << "Starting optimized vector bucketing with distance constraint (beta=" << beta << ")..." << std::endl;
