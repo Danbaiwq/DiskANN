@@ -19,6 +19,11 @@
 #include "/home/danbai.wq/DiskANN/rabitq/rabitqlib/index/query.hpp"
 #include "/home/danbai.wq/DiskANN/rabitq/rabitqlib/utils/space.hpp"
 
+// 全局簇访问统计（线程安全）
+static std::unique_ptr<std::atomic<uint64_t>[]> g_cluster_access_counts;
+static size_t g_cluster_count = 0;
+static std::once_flag g_stats_init_flag;
+
 // 新增：mmap 读取 base.fbin 用于真距复排
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -694,6 +699,7 @@ QueryResult search_two_stage(
     static std::once_flag s_once;
     static std::unique_ptr<BQBucketCache> s_bucket_cache;
     static std::unique_ptr<BQGraphCache>  s_graph_cache;
+    
     std::call_once(s_once, [](){
         size_t bucket_mb = 256, graph_mb = 256;
         if (const char* env = std::getenv("BQ_BUCKET_CACHE_MB")) { try { bucket_mb = std::stoul(env); } catch (...) {} }
@@ -701,6 +707,17 @@ QueryResult search_two_stage(
         s_bucket_cache = std::make_unique<BQBucketCache>(bucket_mb * 1024ULL * 1024ULL);
         s_graph_cache  = std::make_unique<BQGraphCache>( graph_mb * 1024ULL * 1024ULL);
         std::cout << "[BQ Cache] bucket=" << bucket_mb << "MB, graph=" << graph_mb << "MB" << std::endl;
+    });
+    
+    // 初始化全局簇访问统计
+    std::call_once(g_stats_init_flag, [&](){
+        if (!g_cluster_access_counts) {
+            g_cluster_count = buckets.size();
+            g_cluster_access_counts = std::make_unique<std::atomic<uint64_t>[]>(g_cluster_count);
+            for (size_t i = 0; i < g_cluster_count; ++i) {
+                g_cluster_access_counts[i].store(0, std::memory_order_relaxed);
+            }
+        }
     });
 
     // 可选：按桶大小预热前 N 个桶，减少前期 I/O 抖动
@@ -744,6 +761,11 @@ QueryResult search_two_stage(
 
     if (!use_bq) {
         for (uint32_t bucket_id : nearest_bucket_ids) {
+            // 统计簇访问次数
+            if (g_cluster_access_counts && bucket_id < g_cluster_count) {
+                g_cluster_access_counts[bucket_id].fetch_add(1, std::memory_order_relaxed);
+            }
+            
             auto bucket_index = index_cache.get_non_blocking(bucket_id);
             if (bucket_index) {
                 size_t actual_k = std::min(k, bucket_index->get_num_points());
@@ -766,6 +788,10 @@ QueryResult search_two_stage(
         }
     } else {
         for (uint32_t bucket_id : nearest_bucket_ids) {
+            // 统计簇访问次数
+            if (g_cluster_access_counts && bucket_id < g_cluster_count) {
+                g_cluster_access_counts[bucket_id].fetch_add(1, std::memory_order_relaxed);
+            }
             const size_t bucket_size = buckets[bucket_id].size();
             if (bucket_size >= bq_graph_threshold) {
                 std::shared_ptr<const BQGraphData> gp;
@@ -1371,4 +1397,23 @@ double calculate_recall(size_t num_queries, const uint32_t* our_results, size_t 
         total_matches += query_matches;
     }
     return (double)total_matches / (num_queries * recall_at);
+}
+
+// 保存簇访问统计到文件
+void save_cluster_access_stats(const std::string& filename) {
+    std::ofstream out(filename);
+    if (!out.is_open()) {
+        std::cerr << "Failed to open cluster access stats file: " << filename << std::endl;
+        return;
+    }
+    
+    out << "cluster_id,access_count\n";
+    if (g_cluster_access_counts) {
+        for (size_t i = 0; i < g_cluster_count; ++i) {
+            uint64_t count = g_cluster_access_counts[i].load(std::memory_order_relaxed);
+            out << i << "," << count << "\n";
+        }
+    }
+    out.close();
+    std::cout << "Cluster access statistics saved to: " << filename << std::endl;
 } 

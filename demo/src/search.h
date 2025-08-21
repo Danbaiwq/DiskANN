@@ -78,4 +78,7 @@ double calculate_recall(
     const uint32_t* gt_results,
     size_t gt_dim,
     size_t recall_at
-); 
+);
+
+// Save cluster access statistics to file
+void save_cluster_access_stats(const std::string& filename); 

@@ -163,9 +163,18 @@ void build_mode(const std::string& data_path) {
     }
     std::sort(point_order.begin(), point_order.end());
 
-    // 顺序为“更靠近某簇中心的样本先分配”，每样本最多分配到 l 个簇；若簇已满，回退到次近未满簇
-    for (const auto& pr : point_order) {
-        uint32_t i = pr.second;
+    // 并行分配：原子计数 + 线程本地缓冲合并，保持按距离排序的处理顺序
+    std::vector<std::atomic<size_t>> cluster_load_atomic(m);
+    for (size_t c = 0; c < m; ++c) cluster_load_atomic[c].store(cluster_load[c], std::memory_order_relaxed);
+
+    const size_t num_threads = std::max(1, omp_get_max_threads());
+    std::vector<Buckets> thread_local_buckets(num_threads, Buckets(m));
+    std::vector<size_t> thread_local_counts(num_threads, 0);
+
+    #pragma omp parallel for schedule(dynamic, 256)
+    for (size_t ord = 0; ord < point_order.size(); ++ord) {
+        int tid = omp_get_thread_num();
+        uint32_t i = point_order[ord].second;
         DataPoint point = get_point_copy(full_dataset_flat, i, dim);
         std::vector<std::pair<float, uint32_t>> dists;
         dists.reserve(m);
@@ -179,17 +188,47 @@ void build_mode(const std::string& data_path) {
         for (size_t idx = 0; idx < dists.size() && assigned < static_cast<size_t>(l); ++idx) {
             uint32_t cid = dists[idx].second;
             float dist_k = dists[idx].first;
-            // 需满足容量与 beta 距离约束（最近簇无条件，后续需 beta*dist1 >= dist_k）
-            if (cluster_load[cid] < per_cluster_cap && (idx == 0 || (beta * dist1 >= dist_k))) {
-                buckets[cid].push_back(i);
-                cluster_load[cid]++;
-                assigned++;
-                total_bucket_assignments++;
+            if (!(idx == 0 || (beta * dist1 >= dist_k))) continue;
+            size_t cur = cluster_load_atomic[cid].load(std::memory_order_relaxed);
+            while (cur < per_cluster_cap) {
+                if (cluster_load_atomic[cid].compare_exchange_weak(cur, cur + 1, std::memory_order_acq_rel)) {
+                    thread_local_buckets[tid][cid].push_back(i);
+                    thread_local_counts[tid] += 1;
+                    assigned += 1;
+                    break;
+                }
             }
         }
     }
 
+    // 合并线程本地结果
+    for (int tid = 0; tid < static_cast<int>(num_threads); ++tid) {
+        for (size_t cid = 0; cid < m; ++cid) {
+            if (!thread_local_buckets[tid][cid].empty()) {
+                auto& dst = buckets[cid];
+                auto& src = thread_local_buckets[tid][cid];
+                dst.insert(dst.end(), src.begin(), src.end());
+            }
+        }
+        total_bucket_assignments += thread_local_counts[tid];
+    }
+
+    // 同步 cluster_load 为最终值
+    for (size_t cid = 0; cid < m; ++cid) {
+        cluster_load[cid] = cluster_load_atomic[cid].load(std::memory_order_relaxed);
+    }
+
     double average_buckets_per_vector = total_bucket_assignments ? (static_cast<double>(total_bucket_assignments) / num_points) : 0.0;
+    
+    // --- 记录每个簇的向量数量统计 ---
+    std::ofstream cluster_stats(resolve_write_path("cluster_stats.txt"));
+    cluster_stats << "cluster_id,vector_count\n";
+    for (size_t i = 0; i < m; ++i) {
+        cluster_stats << i << "," << buckets[i].size() << "\n";
+    }
+    cluster_stats.close();
+    std::cout << "Cluster statistics saved to cluster_stats.txt" << std::endl;
+    
     // --- Save Buckets & Metadata ---
     std::cout << "Saving bucket assignments and metadata..." << std::endl;
     save_buckets(resolve_write_path("buckets.bin"), buckets);
@@ -426,6 +465,9 @@ void search_mode(const std::string& query_path, const std::string& gt_path) {
     if (use_bq_flag != 1) {
         bucket_index_cache.print_stats();
     }
+    
+    // 保存簇访问统计
+    save_cluster_access_stats(resolve_write_path("cluster_access_stats.txt"));
 }
 
 

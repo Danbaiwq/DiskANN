@@ -139,4 +139,24 @@ python "$REPO_ROOT/perf/monitor_process.py" $PID -d "$DURATION" -i "$INTERVAL" -
 # 等待被监控进程退出（以确保 CSV/PNG 完整）
 wait $PID
 
-echo "✅ 监控结束，输出: $SCRIPT_DIR/search_monitor.csv 和对应 PNG"
+# 分析簇向量分布（如果存在统计文件）
+CLUSTER_STATS_FILE="$INDEX_DIR/cluster_stats.txt"
+if [[ -f "$CLUSTER_STATS_FILE" ]]; then
+    echo "🔍 分析簇向量数量分布..."
+    python "$SCRIPT_DIR/analyze_cluster_stats.py" "$CLUSTER_STATS_FILE" -o "$SCRIPT_DIR"
+    echo "📊 簇分布分析完成，结果保存在 $SCRIPT_DIR/"
+else
+    echo "⚠️  未找到簇统计文件 $CLUSTER_STATS_FILE，跳过分布分析"
+fi
+
+# 分析簇访问统计（如果存在统计文件）
+CLUSTER_ACCESS_FILE="$SCRIPT_DIR/cluster_access_stats.txt"
+if [[ -f "$CLUSTER_ACCESS_FILE" ]]; then
+    echo "🔍 分析簇访问统计..."
+    python "$SCRIPT_DIR/analyze_cluster_access.py" "$CLUSTER_ACCESS_FILE" -c "$CLUSTER_STATS_FILE" -o "$SCRIPT_DIR"
+    echo "📊 簇访问分析完成，结果保存在 $SCRIPT_DIR/"
+else
+    echo "⚠️  未找到簇访问统计文件 $CLUSTER_ACCESS_FILE，跳过访问分析"
+fi
+
+
