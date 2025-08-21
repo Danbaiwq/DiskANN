@@ -139,51 +139,57 @@ void build_mode(const std::string& data_path) {
         /*tol=*/1e-4f,
         /*patience=*/3);
     
-    // --- 优化的数据分桶策略 (基于距离比例约束) ---
-    std::cout << "Starting optimized vector bucketing with distance constraint (beta=" << beta << ")..." << std::endl;
+    // --- 均衡后的分桶策略（容量约束 + 次近回退） ---
+    std::cout << "Starting balanced vector bucketing with capacity constraint..." << std::endl;
 
     Buckets buckets(m);
-    size_t total_bucket_assignments = 0;  // 使用普通变量进行统计
-    
-    #pragma omp parallel for reduction(+:total_bucket_assignments)
+    size_t total_bucket_assignments = 0;
+
+    // 每个簇的容量上限：不超过 (l * N) / m
+    const size_t per_cluster_cap = (static_cast<size_t>(l) * num_points) / m;
+    std::vector<size_t> cluster_load(m, 0);
+
+    // 先按样本到最近质心的距离排序
+    std::vector<std::pair<float, uint32_t>> point_order(num_points);
+    #pragma omp parallel for
     for (size_t i = 0; i < num_points; ++i) {
         DataPoint point = get_point_copy(full_dataset_flat, i, dim);
+        float best = std::numeric_limits<float>::max();
+        for (uint32_t j = 0; j < m; ++j) {
+            float d = calculate_distance(point, final_centroids[j]);
+            if (d < best) best = d;
+        }
+        point_order[i] = {best, static_cast<uint32_t>(i)};
+    }
+    std::sort(point_order.begin(), point_order.end());
+
+    // 顺序为“更靠近某簇中心的样本先分配”，每样本最多分配到 l 个簇；若簇已满，回退到次近未满簇
+    for (const auto& pr : point_order) {
+        uint32_t i = pr.second;
+        DataPoint point = get_point_copy(full_dataset_flat, i, dim);
         std::vector<std::pair<float, uint32_t>> dists;
-        
-        // 计算到所有聚类中心的距离
+        dists.reserve(m);
         for (uint32_t j = 0; j < m; ++j) {
             dists.push_back({calculate_distance(point, final_centroids[j]), j});
         }
-        
-        // 按距离排序
         std::sort(dists.begin(), dists.end());
-        
-        // 获取最近距离作为基准
+
+        size_t assigned = 0;
         float dist1 = dists[0].first;
-        size_t buckets_assigned = 0;
-        
-        // 应用距离比例约束的智能分桶策略
-        for (int k = 0; k < l && k < static_cast<int>(dists.size()); ++k) {
-            float dist_k = dists[k].first;
-            
-            // 第一个桶（最近的）总是分配
-            // 后续桶需要满足距离约束：beta * dist1 >= dist_k
-            if (k == 0 || (beta * dist1 >= dist_k)) {
-                #pragma omp critical
-                {
-                    buckets[dists[k].second].push_back(i);
-                }
-                buckets_assigned++;
-            } else {
-                // 距离约束不满足，停止分配
-                break;
+        for (size_t idx = 0; idx < dists.size() && assigned < static_cast<size_t>(l); ++idx) {
+            uint32_t cid = dists[idx].second;
+            float dist_k = dists[idx].first;
+            // 需满足容量与 beta 距离约束（最近簇无条件，后续需 beta*dist1 >= dist_k）
+            if (cluster_load[cid] < per_cluster_cap && (idx == 0 || (beta * dist1 >= dist_k))) {
+                buckets[cid].push_back(i);
+                cluster_load[cid]++;
+                assigned++;
+                total_bucket_assignments++;
             }
         }
-        
-        total_bucket_assignments += buckets_assigned;
     }
 
-    double average_buckets_per_vector = static_cast<double>(total_bucket_assignments) / num_points;
+    double average_buckets_per_vector = total_bucket_assignments ? (static_cast<double>(total_bucket_assignments) / num_points) : 0.0;
     // --- Save Buckets & Metadata ---
     std::cout << "Saving bucket assignments and metadata..." << std::endl;
     save_buckets(resolve_write_path("buckets.bin"), buckets);
