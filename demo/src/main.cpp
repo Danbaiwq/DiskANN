@@ -220,14 +220,23 @@ void build_mode(const std::string& data_path) {
 
     double average_buckets_per_vector = total_bucket_assignments ? (static_cast<double>(total_bucket_assignments) / num_points) : 0.0;
     
-    // --- 记录每个簇的向量数量统计 ---
-    std::ofstream cluster_stats(resolve_write_path("cluster_stats.txt"));
-    cluster_stats << "cluster_id,vector_count\n";
-    for (size_t i = 0; i < m; ++i) {
-        cluster_stats << i << "," << buckets[i].size() << "\n";
+    // --- 记录每个簇的向量数量统计（可禁用 via CLUSTER_STATS_ENABLE） ---
+    auto env_enable = std::getenv("CLUSTER_STATS_ENABLE");
+    bool enable_stats = true;
+    if (env_enable) {
+        std::string v(env_enable);
+        for (auto& c : v) c = (char)std::tolower(c);
+        enable_stats = !(v == "0" || v == "false" || v == "off");
     }
-    cluster_stats.close();
-    std::cout << "Cluster statistics saved to cluster_stats.txt" << std::endl;
+    if (enable_stats) {
+        std::ofstream cluster_stats(resolve_write_path("cluster_stats.txt"));
+        cluster_stats << "cluster_id,vector_count\n";
+        for (size_t i = 0; i < m; ++i) {
+            cluster_stats << i << "," << buckets[i].size() << "\n";
+        }
+        cluster_stats.close();
+        std::cout << "Cluster statistics saved to cluster_stats.txt" << std::endl;
+    }
     
     // --- Save Buckets & Metadata ---
     std::cout << "Saving bucket assignments and metadata..." << std::endl;

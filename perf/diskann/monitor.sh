@@ -21,7 +21,7 @@ echo "✅ 启动程序: /home/danbai.wq/DiskANN/build/apps/search_disk_index"
 echo "   PID: $PID"
 
 # 使用 Python 监控脚本监控该 PID（假设监控 10 分钟足够）
-python /home/danbai.wq/DiskANN/perf/monitor_process.py $PID -d 600 -i 0.1 -o diskann/search_monitor.csv
+python /home/danbai.wq/DiskANN/perf/monitor_process.py $PID -d 600 -i 0.1 -o /home/danbai.wq/DiskANN/perf/diskann/search_monitor.csv
 
 # 等待进程结束（可选）
 wait $PID

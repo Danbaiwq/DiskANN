@@ -8,6 +8,7 @@
 #include <limits>
 #include <cstdlib>
 #include <filesystem>
+#include <cstring>
 #include "index.h"
 #include "parameters.h"
 #include "kmeans.h"
@@ -23,6 +24,20 @@
 static std::unique_ptr<std::atomic<uint64_t>[]> g_cluster_access_counts;
 static size_t g_cluster_count = 0;
 static std::once_flag g_stats_init_flag;
+
+static inline bool cluster_stats_enabled() {
+	static int s = -1;
+	if (s == -1) {
+		const char* e = std::getenv("CLUSTER_STATS_ENABLE");
+		if (e == nullptr) { s = 1; }
+		else {
+			std::string v(e);
+			for (auto& c : v) c = (char)std::tolower(c);
+			s = (v == "0" || v == "false" || v == "off") ? 0 : 1;
+		}
+	}
+	return s != 0;
+}
 
 // 新增：mmap 读取 base.fbin 用于真距复排
 #include <sys/mman.h>
@@ -709,16 +724,18 @@ QueryResult search_two_stage(
         std::cout << "[BQ Cache] bucket=" << bucket_mb << "MB, graph=" << graph_mb << "MB" << std::endl;
     });
     
-    // 初始化全局簇访问统计
-    std::call_once(g_stats_init_flag, [&](){
-        if (!g_cluster_access_counts) {
-            g_cluster_count = buckets.size();
-            g_cluster_access_counts = std::make_unique<std::atomic<uint64_t>[]>(g_cluster_count);
-            for (size_t i = 0; i < g_cluster_count; ++i) {
-                g_cluster_access_counts[i].store(0, std::memory_order_relaxed);
+    // 初始化全局簇访问统计（可禁用）
+    if (cluster_stats_enabled()) {
+        std::call_once(g_stats_init_flag, [&](){
+            if (!g_cluster_access_counts) {
+                g_cluster_count = buckets.size();
+                g_cluster_access_counts = std::make_unique<std::atomic<uint64_t>[]>(g_cluster_count);
+                for (size_t i = 0; i < g_cluster_count; ++i) {
+                    g_cluster_access_counts[i].store(0, std::memory_order_relaxed);
+                }
             }
-        }
-    });
+        });
+    }
 
     // 可选：按桶大小预热前 N 个桶，减少前期 I/O 抖动
     static std::atomic<bool> s_prewarmed{false};
@@ -761,8 +778,8 @@ QueryResult search_two_stage(
 
     if (!use_bq) {
         for (uint32_t bucket_id : nearest_bucket_ids) {
-            // 统计簇访问次数
-            if (g_cluster_access_counts && bucket_id < g_cluster_count) {
+            // 统计簇访问次数（可禁用）
+            if (cluster_stats_enabled() && g_cluster_access_counts && bucket_id < g_cluster_count) {
                 g_cluster_access_counts[bucket_id].fetch_add(1, std::memory_order_relaxed);
             }
             
@@ -788,8 +805,8 @@ QueryResult search_two_stage(
         }
     } else {
         for (uint32_t bucket_id : nearest_bucket_ids) {
-            // 统计簇访问次数
-            if (g_cluster_access_counts && bucket_id < g_cluster_count) {
+            // 统计簇访问次数（可禁用）
+            if (cluster_stats_enabled() && g_cluster_access_counts && bucket_id < g_cluster_count) {
                 g_cluster_access_counts[bucket_id].fetch_add(1, std::memory_order_relaxed);
             }
             const size_t bucket_size = buckets[bucket_id].size();
@@ -1401,6 +1418,8 @@ double calculate_recall(size_t num_queries, const uint32_t* our_results, size_t 
 
 // 保存簇访问统计到文件
 void save_cluster_access_stats(const std::string& filename) {
+    if (!cluster_stats_enabled()) return;
+    if (!g_cluster_access_counts || g_cluster_count == 0) return;
     std::ofstream out(filename);
     if (!out.is_open()) {
         std::cerr << "Failed to open cluster access stats file: " << filename << std::endl;
@@ -1408,11 +1427,9 @@ void save_cluster_access_stats(const std::string& filename) {
     }
     
     out << "cluster_id,access_count\n";
-    if (g_cluster_access_counts) {
-        for (size_t i = 0; i < g_cluster_count; ++i) {
-            uint64_t count = g_cluster_access_counts[i].load(std::memory_order_relaxed);
-            out << i << "," << count << "\n";
-        }
+    for (size_t i = 0; i < g_cluster_count; ++i) {
+        uint64_t count = g_cluster_access_counts[i].load(std::memory_order_relaxed);
+        out << i << "," << count << "\n";
     }
     out.close();
     std::cout << "Cluster access statistics saved to: " << filename << std::endl;
