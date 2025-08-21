@@ -68,10 +68,10 @@ void build_mode(const std::string& data_path) {
     const float alpha = 0.01f;
     const size_t m = 1024;
     const int t = 8;
-    const int l = 5;
-    const float beta = 1.02f;  // 新增：距离比例约束参数
-    const size_t graph_degree = 64;
-    const size_t build_complexity = 128;
+    const int l = 8;
+    const float beta = 1.6f;  // 新增：距离比例约束参数
+    const size_t graph_degree = 32;
+    const size_t build_complexity = 50;
 
     // bq 开关与bits（默认从环境变量读取，不存在则默认关闭bq）
     bool use_bq = false;
@@ -129,25 +129,15 @@ void build_mode(const std::string& data_path) {
         return;
     }
 
-    // --- K-means Clustering ---
-    std::cout << "Starting K-means clustering (t=" << t << ", m=" << m << ")..." << std::endl;
-    // 收集 t 次 mini-batch 的 m 个中心，总计 t*m 个候选中心
-    DataSet all_centroids; all_centroids.reserve(static_cast<size_t>(t) * m);
-    #pragma omp parallel for
-    for (int i = 0; i < t; ++i) {
-        DataSet sampled_data = sample_data(full_dataset_flat, num_points, dim, alpha);
-        DataSet initial_centroids = kmeans_plusplus_init(sampled_data, m);
-        DataSet centroids = kmeans_lloyds(sampled_data, m, initial_centroids, 100);
-        #pragma omp critical
-        {
-            for (size_t j = 0; j < centroids.size(); ++j) {
-                all_centroids.push_back(centroids[j]);
-            }
-        }
-    }
-    // 在 t*m 个中心上再聚成最终 m 个中心
-    DataSet init2 = kmeans_plusplus_init(all_centroids, m);
-    DataSet final_centroids = kmeans_lloyds(all_centroids, m, init2, 100);
+    // --- 分布式多轮 mini-batch KMeans ---
+    std::cout << "Starting Distributed Mini-batch KMeans (W=t=" << t << ", k=" << m << ")..." << std::endl;
+    DataSet final_centroids = distributed_minibatch_kmeans(
+        full_dataset_flat, num_points, dim,
+        m, /*workers=*/t,
+        alpha,
+        /*max_iter=*/200,
+        /*tol=*/1e-4f,
+        /*patience=*/3);
     
     // --- 优化的数据分桶策略 (基于距离比例约束) ---
     std::cout << "Starting optimized vector bucketing with distance constraint (beta=" << beta << ")..." << std::endl;

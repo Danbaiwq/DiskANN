@@ -32,7 +32,7 @@ BQ_SEEDS="${BQ_SEEDS:-8}"                       # bqgraph 的入口点数
 RERANK_USE_MMAP="${RERANK_USE_MMAP:-0}"
 
 # 新增：查询参数 F 与 K
-DEMO_F_PARAM="${DEMO_F_PARAM:-20}"
+DEMO_F_PARAM="${DEMO_F_PARAM:-15}"
 DEMO_K_PARAM="${DEMO_K_PARAM:-100}"
 
 # 新增：BQ 缓存内存预算（MB）
