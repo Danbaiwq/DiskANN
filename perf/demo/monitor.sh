@@ -25,19 +25,19 @@ BASE_FBIN="${BASE_FBIN:-$REPO_ROOT/build/data/gist_base.fbin}"
 RERANK_O_DIRECT="${RERANK_O_DIRECT:-1}"
 
 # 查询参数（可按需调整）
-BQ_GRAPH_THRESHOLD="${BQ_GRAPH_THRESHOLD:-8000}"  # >= 阈值走 bqgraph，否则 bq.bin fastscan
-BQ_EF_SEARCH="${BQ_EF_SEARCH:-128}"             # bqgraph 的 ef 宽度
+BQ_GRAPH_THRESHOLD="${BQ_GRAPH_THRESHOLD:-16000}"  # >= 阈值走 bqgraph，否则 bq.bin fastscan
+BQ_EF_SEARCH="${BQ_EF_SEARCH:-196}"             # bqgraph 的 ef 宽度
 BQ_SEEDS="${BQ_SEEDS:-8}"                       # bqgraph 的入口点数
 # 是否允许 mmap 回退（默认关闭，保持与 DiskANN fastscan
 RERANK_USE_MMAP="${RERANK_USE_MMAP:-0}"
 
 # 新增：查询参数 F 与 K
-DEMO_F_PARAM="${DEMO_F_PARAM:-15}"
+DEMO_F_PARAM="${DEMO_F_PARAM:-1}"
 DEMO_K_PARAM="${DEMO_K_PARAM:-100}"
 
 # 新增：BQ 缓存内存预算（MB）
-BQ_BUCKET_CACHE_MB="${BQ_BUCKET_CACHE_MB:-100}"
-BQ_GRAPH_CACHE_MB="${BQ_GRAPH_CACHE_MB:-400}"
+BQ_BUCKET_CACHE_MB="${BQ_BUCKET_CACHE_MB:-300}"
+BQ_GRAPH_CACHE_MB="${BQ_GRAPH_CACHE_MB:-300}"
 # 新增：预热前 N 个最大桶（按桶大小排序，0 表示不预热）
 BQ_PREWARM_TOP="${BQ_PREWARM_TOP:-0}"
 
@@ -59,6 +59,8 @@ RERANK_AIO_DEPTH="${RERANK_AIO_DEPTH:-256}"        # libaio 队列深度
 CONSTRUCT_QUANTIZATION="${CONSTRUCT_QUANTIZATION:-bq}"  # 仅用于展示
 # 记录统计信息
 CLUSTER_STATS_ENABLE=${CLUSTER_STATS_ENABLE:-1}
+# 新增：禁用召回评估
+DISABLE_RECALL_EVAL=${DISABLE_RECALL_EVAL:-0}
 # =====================================
 
 # 基本校验
@@ -101,6 +103,7 @@ cat <<EOF
 [demo search] DEMO_F_PARAM       : $DEMO_F_PARAM
 [demo search] DEMO_K_PARAM       : $DEMO_K_PARAM
 [demo search] CLUSTER_STATS_ENABLE : $CLUSTER_STATS_ENABLE
+[demo search] DISABLE_RECALL_EVAL : $DISABLE_RECALL_EVAL
 EOF
 
 # 确保绘图不阻塞（monitor_process.py 内已支持 PLOT_SHOW 环境开关）
@@ -129,6 +132,7 @@ RERANK_AIO_DEPTH="$RERANK_AIO_DEPTH" \
 DEMO_F_PARAM="$DEMO_F_PARAM" \
 DEMO_K_PARAM="$DEMO_K_PARAM" \
 CLUSTER_STATS_ENABLE="$CLUSTER_STATS_ENABLE" \
+DISABLE_RECALL_EVAL="$DISABLE_RECALL_EVAL" \
 "$DEMO_BIN" "$QUERY_FBIN" "$GROUNDTRUTH_IVECS" &
 
 PID=$!

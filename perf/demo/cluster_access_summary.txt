@@ -1,36 +1,36 @@
 Cluster Access Statistics Summary
 ========================================
-Total Clusters: 1024
-Total Accesses: 15000
-Mean Access Count: 14.6484
-Standard Deviation: 20.3628
-Variance: 414.6440
+Total Clusters: 512
+Total Accesses: 1000
+Mean Access Count: 1.9531
+Standard Deviation: 2.6593
+Variance: 7.0720
 Minimum: 0
-Maximum: 125
-Median: 5.0000
-Clusters Never Accessed: 378 (36.91%)
-Clusters Accessed: 646 (63.09%)
-Coeff. of Variation: 139.0101%
+Maximum: 14
+Median: 1.0000
+Clusters Never Accessed: 229 (44.73%)
+Clusters Accessed: 283 (55.27%)
+Coeff. of Variation: 136.1576%
 
 Percentile Information:
   10th percentile: 0.00
   25th percentile: 0.00
-  50th percentile: 5.00
-  75th percentile: 24.00
-  90th percentile: 44.00
-  95th percentile: 58.00
-  99th percentile: 84.77
+  50th percentile: 1.00
+  75th percentile: 3.00
+  90th percentile: 5.00
+  95th percentile: 8.00
+  99th percentile: 11.00
 
 Top 10 Most Accessed Clusters:
-  1. Cluster 16: 125 accesses (size: 7812)
-  2. Cluster 483: 118 accesses (size: 7812)
-  3. Cluster 130: 102 accesses (size: 7812)
-  4. Cluster 98: 98 accesses (size: 7812)
-  5. Cluster 834: 97 accesses (size: 7812)
-  6. Cluster 114: 93 accesses (size: 7812)
-  7. Cluster 1006: 91 accesses (size: 7812)
-  8. Cluster 904: 90 accesses (size: 7812)
-  9. Cluster 949: 87 accesses (size: 7812)
-  10. Cluster 104: 86 accesses (size: 7812)
+  1. Cluster 337: 14 accesses (size: 15625)
+  2. Cluster 473: 13 accesses (size: 15625)
+  3. Cluster 453: 12 accesses (size: 15625)
+  4. Cluster 50: 11 accesses (size: 15625)
+  5. Cluster 238: 11 accesses (size: 15625)
+  6. Cluster 211: 11 accesses (size: 15625)
+  7. Cluster 262: 11 accesses (size: 15625)
+  8. Cluster 272: 10 accesses (size: 15625)
+  9. Cluster 198: 10 accesses (size: 15625)
+  10. Cluster 163: 10 accesses (size: 15625)
 
-Correlation with Cluster Size: 0.5688
+Correlation with Cluster Size: 0.4702

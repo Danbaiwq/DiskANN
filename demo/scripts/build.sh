@@ -22,7 +22,7 @@ BASE_FBIN="${BASE_FBIN:-$REPO_ROOT/build/data/gist_base.fbin}"    # 例：/data/
 # 构建参数（可按需调整）
 USE_BQ="${USE_BQ:-1}"                 # 1 启用 BQ 模式；0 构 raw 的 bucket_vamana.index
 BQ_BITS="${BQ_BITS:-4}"                # 量化比特总数
-BQ_GRAPH_THRESHOLD="${BQ_GRAPH_THRESHOLD:-8000}"  # >= 阈值构 bqgraph，否则 bq.bin
+BQ_GRAPH_THRESHOLD="${BQ_GRAPH_THRESHOLD:-16000}"  # >= 阈值构 bqgraph，否则 bq.bin
 BQ_SATURATE_PASS="${BQ_SATURATE_PASS:-1}"        # 轻量互连/饱和微修复（度不增）
 
 # 新增：构图量化模式（仅在 USE_BQ=1 时生效）

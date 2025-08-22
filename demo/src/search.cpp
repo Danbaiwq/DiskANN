@@ -25,18 +25,25 @@ static std::unique_ptr<std::atomic<uint64_t>[]> g_cluster_access_counts;
 static size_t g_cluster_count = 0;
 static std::once_flag g_stats_init_flag;
 
+// 实现释放簇访问统计的函数
+void release_cluster_access_stats() {
+    // 注意：g_stats_init_flag 无法重置，但释放内存即可
+    g_cluster_access_counts.reset();
+    g_cluster_count = 0;
+}
+
 static inline bool cluster_stats_enabled() {
-	static int s = -1;
-	if (s == -1) {
-		const char* e = std::getenv("CLUSTER_STATS_ENABLE");
-		if (e == nullptr) { s = 1; }
-		else {
-			std::string v(e);
-			for (auto& c : v) c = (char)std::tolower(c);
-			s = (v == "0" || v == "false" || v == "off") ? 0 : 1;
-		}
-	}
-	return s != 0;
+    static int s = -1;
+    if (s == -1) {
+        const char* e = std::getenv("CLUSTER_STATS_ENABLE");
+        if (e == nullptr) { s = 1; }
+        else {
+            std::string v(e);
+            for (auto& c : v) c = (char)std::tolower(c);
+            s = (v == "0" || v == "false" || v == "off") ? 0 : 1;
+        }
+    }
+    return s != 0;
 }
 
 // 新增：mmap 读取 base.fbin 用于真距复排
@@ -297,6 +304,14 @@ void IndexCache::put_locked(uint32_t key, IndexPtr index) {
     }
 }
 
+// 清空索引缓存，释放内存
+void IndexCache::clear() {
+    std::unique_lock<std::shared_mutex> lock(mtx);
+    cache.clear();
+    lru.clear();
+    current_size = 0;
+}
+
 // 简单的bq桶数据结构（按桶保存一次读取的数据）
 struct BQBucketData {
     size_t padded_dim{0};
@@ -391,6 +406,13 @@ public:
         return loaded;
     }
 
+    void clear() {
+        std::unique_lock<std::shared_mutex> lk(mtx_);
+        map_.clear();
+        lru_.clear();
+        cur_bytes_ = 0;
+    }
+
 private:
     struct Node { std::shared_ptr<const T> value; size_t bytes; };
     size_t max_bytes_;
@@ -402,6 +424,15 @@ private:
 
 using BQBucketCache = SimpleLRUCache<BQBucketData, estimate_bucket_bytes>;
 using BQGraphCache  = SimpleLRUCache<BQGraphData,  estimate_graph_bytes>;
+}
+
+// 全局 BQ 缓存句柄（search_two_stage 懒加载）
+static std::unique_ptr<BQBucketCache> g_bq_bucket_cache;
+static std::unique_ptr<BQGraphCache>  g_bq_graph_cache;
+
+void clear_bq_caches() {
+    if (g_bq_bucket_cache) g_bq_bucket_cache->clear();
+    if (g_bq_graph_cache)  g_bq_graph_cache->clear();
 }
 
 static bool load_bq_bucket(uint32_t bucket_id, BQBucketData& out) {
@@ -712,15 +743,12 @@ QueryResult search_two_stage(
 ) {
     // 懒加载全局 BQ 缓存
     static std::once_flag s_once;
-    static std::unique_ptr<BQBucketCache> s_bucket_cache;
-    static std::unique_ptr<BQGraphCache>  s_graph_cache;
-    
     std::call_once(s_once, [](){
         size_t bucket_mb = 256, graph_mb = 256;
         if (const char* env = std::getenv("BQ_BUCKET_CACHE_MB")) { try { bucket_mb = std::stoul(env); } catch (...) {} }
         if (const char* env = std::getenv("BQ_GRAPH_CACHE_MB"))  { try { graph_mb  = std::stoul(env); } catch (...) {} }
-        s_bucket_cache = std::make_unique<BQBucketCache>(bucket_mb * 1024ULL * 1024ULL);
-        s_graph_cache  = std::make_unique<BQGraphCache>( graph_mb * 1024ULL * 1024ULL);
+        g_bq_bucket_cache = std::make_unique<BQBucketCache>(bucket_mb * 1024ULL * 1024ULL);
+        g_bq_graph_cache  = std::make_unique<BQGraphCache>( graph_mb * 1024ULL * 1024ULL);
         std::cout << "[BQ Cache] bucket=" << bucket_mb << "MB, graph=" << graph_mb << "MB" << std::endl;
     });
     
@@ -757,9 +785,9 @@ QueryResult search_two_stage(
                     uint32_t bid = by_size[i].first;
                     size_t bsz = by_size[i].second;
                     if (bsz >= bq_graph_threshold) {
-                        if (s_graph_cache) { s_graph_cache->get_or_load(bid, [&](BQGraphData& dst){ return load_bq_graph(bid, dst); }); }
+                        if (g_bq_graph_cache) { g_bq_graph_cache->get_or_load(bid, [&](BQGraphData& dst){ return load_bq_graph(bid, dst); }); }
                     } else {
-                        if (s_bucket_cache) { s_bucket_cache->get_or_load(bid, [&](BQBucketData& dst){ return load_bq_bucket(bid, dst); }); }
+                        if (g_bq_bucket_cache) { g_bq_bucket_cache->get_or_load(bid, [&](BQBucketData& dst){ return load_bq_bucket(bid, dst); }); }
                     }
                 }
                 std::cout << "[BQ Cache] prewarmed top " << topN << " buckets by size" << std::endl;
@@ -812,8 +840,8 @@ QueryResult search_two_stage(
             const size_t bucket_size = buckets[bucket_id].size();
             if (bucket_size >= bq_graph_threshold) {
                 std::shared_ptr<const BQGraphData> gp;
-                if (s_graph_cache) {
-                    gp = s_graph_cache->get_or_load(bucket_id, [&](BQGraphData& dst){ return load_bq_graph(bucket_id, dst); });
+                if (g_bq_graph_cache) {
+                    gp = g_bq_graph_cache->get_or_load(bucket_id, [&](BQGraphData& dst){ return load_bq_graph(bucket_id, dst); });
                 }
                 BQGraphData localG;
                 const BQGraphData* G = nullptr;
@@ -841,8 +869,8 @@ QueryResult search_two_stage(
             }
 
             std::shared_ptr<const BQBucketData> bp;
-            if (s_bucket_cache) {
-                bp = s_bucket_cache->get_or_load(bucket_id, [&](BQBucketData& dst){ return load_bq_bucket(bucket_id, dst); });
+            if (g_bq_bucket_cache) {
+                bp = g_bq_bucket_cache->get_or_load(bucket_id, [&](BQBucketData& dst){ return load_bq_bucket(bucket_id, dst); });
             }
             BQBucketData localB;
             const BQBucketData* bd = nullptr;

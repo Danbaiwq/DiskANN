@@ -30,6 +30,9 @@ public:
     // 获取缓存统计信息
     void print_stats() const;
 
+    // 清空缓存，释放内存
+    void clear();
+
 private:
     void put_locked(uint32_t key, IndexPtr index);
     
@@ -81,4 +84,10 @@ double calculate_recall(
 );
 
 // Save cluster access statistics to file
-void save_cluster_access_stats(const std::string& filename); 
+void save_cluster_access_stats(const std::string& filename);
+
+// 清理 BQ 查询缓存（桶/图），用于查询结束后及时释放内存
+void clear_bq_caches();
+
+// 释放簇访问统计占用的全局内存
+void release_cluster_access_stats(); 

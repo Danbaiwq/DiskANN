@@ -66,7 +66,7 @@ void build_mode(const std::string& data_path) {
 
     // --- Parameters ---
     const float alpha = 0.01f;
-    const size_t m = 1024;
+    const size_t m = 256;
     const int t = 8;
     const int l = 8;
     const float beta = 1.6f;  // 新增：距离比例约束参数
@@ -424,12 +424,17 @@ void search_mode(const std::string& query_path, const std::string& gt_path) {
     }
 
     // --- Set up the LRU Index Cache ---
-    const size_t cache_size_bytes = (use_bq_flag == 1 ? 0ULL : (1ULL * 1024 * 1024 * 1024)); // BQ模式下关闭缓存
+    size_t cache_mb = (use_bq_flag == 1 ? 0ULL : 256ULL); // 默认下调至 256MB，BQ 模式下为 0
+    if (const char* env_cache = std::getenv("INDEX_CACHE_MB")) {
+        try { cache_mb = std::stoull(env_cache); } catch (...) {}
+        if (use_bq_flag == 1) cache_mb = 0ULL; // BQ 模式始终禁用
+    }
+    const size_t cache_size_bytes = cache_mb * 1024ULL * 1024ULL;
     IndexCache bucket_index_cache(cache_size_bytes, dim, graph_degree);
-    if (use_bq_flag != 1) {
-        std::cout << "LRU index cache initialized with a " << cache_size_bytes / (1024*1024) << "MB budget." << std::endl;
+    if (cache_mb > 0) {
+        std::cout << "LRU index cache initialized with a " << cache_mb << "MB budget." << std::endl;
     } else {
-        std::cout << "BQ mode detected: disabling Vamana LRU cache to save memory." << std::endl;
+        std::cout << "Vamana LRU cache disabled (cache_mb=" << cache_mb << ")." << std::endl;
     }
 
     // --- Parameters for Search Evaluation ---
@@ -477,6 +482,13 @@ void search_mode(const std::string& query_path, const std::string& gt_path) {
     
     // 保存簇访问统计
     save_cluster_access_stats(resolve_write_path("cluster_access_stats.txt"));
+
+    // 查询结束后主动释放缓存，避免内存常驻
+    clear_bq_caches();
+    if (use_bq_flag != 1) {
+        bucket_index_cache.clear();
+    }
+    release_cluster_access_stats();
 }
 
 
