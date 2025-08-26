@@ -32,12 +32,12 @@ BQ_SEEDS="${BQ_SEEDS:-8}"                       # bqgraph 的入口点数
 RERANK_USE_MMAP="${RERANK_USE_MMAP:-0}"
 
 # 新增：查询参数 F 与 K
-DEMO_F_PARAM="${DEMO_F_PARAM:-1}"
+DEMO_F_PARAM="${DEMO_F_PARAM:-4}"
 DEMO_K_PARAM="${DEMO_K_PARAM:-100}"
 
 # 新增：BQ 缓存内存预算（MB）
 BQ_BUCKET_CACHE_MB="${BQ_BUCKET_CACHE_MB:-300}"
-BQ_GRAPH_CACHE_MB="${BQ_GRAPH_CACHE_MB:-300}"
+BQ_GRAPH_CACHE_MB="${BQ_GRAPH_CACHE_MB:-400}"
 # 新增：预热前 N 个最大桶（按桶大小排序，0 表示不预热）
 BQ_PREWARM_TOP="${BQ_PREWARM_TOP:-0}"
 

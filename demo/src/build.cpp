@@ -115,6 +115,68 @@ static void pad_dataset(const DataSet& in, size_t padded_dim, DataSet& out) {
     for (auto& v : out) v.resize(padded_dim, 0.0f);
 }
 
+// 新增：按维度量化为 uint8（对整桶，每维 min-max 映射到 [0,255]）
+static void quantize_u8_per_dim(const DataSet& padded, size_t padded_dim, std::vector<uint8_t>& flat_u8) {
+    const size_t num = padded.size();
+    if (num == 0) { flat_u8.clear(); return; }
+    std::vector<float> minv(padded_dim, std::numeric_limits<float>::max());
+    std::vector<float> maxv(padded_dim, std::numeric_limits<float>::lowest());
+    for (size_t i = 0; i < num; ++i) {
+        const auto& v = padded[i];
+        for (size_t d = 0; d < padded_dim; ++d) {
+            float x = v[d];
+            if (x < minv[d]) minv[d] = x;
+            if (x > maxv[d]) maxv[d] = x;
+        }
+    }
+    flat_u8.resize(num * padded_dim);
+    for (size_t i = 0; i < num; ++i) {
+        const auto& v = padded[i];
+        uint8_t* dst = &flat_u8[i * padded_dim];
+        for (size_t d = 0; d < padded_dim; ++d) {
+            float mn = minv[d], mx = maxv[d];
+            float range = mx - mn;
+            float val = v[d];
+            if (range <= 1e-12f) { dst[d] = 0; continue; }
+            float norm = (val - mn) * (255.0f / range);
+            int q = static_cast<int>(std::round(norm));
+            if (q < 0) q = 0; else if (q > 255) q = 255;
+            dst[d] = static_cast<uint8_t>(q);
+        }
+    }
+}
+
+// 新增：按维度对称量化为 int8（每维映射到 [-128,127]）
+static void quantize_i8_per_dim(const DataSet& padded, size_t padded_dim, std::vector<int8_t>& flat_i8) {
+    const size_t num = padded.size();
+    if (num == 0) { flat_i8.clear(); return; }
+    std::vector<float> minv(padded_dim, std::numeric_limits<float>::max());
+    std::vector<float> maxv(padded_dim, std::numeric_limits<float>::lowest());
+    for (size_t i = 0; i < num; ++i) {
+        const auto& v = padded[i];
+        for (size_t d = 0; d < padded_dim; ++d) {
+            float x = v[d];
+            if (x < minv[d]) minv[d] = x;
+            if (x > maxv[d]) maxv[d] = x;
+        }
+    }
+    flat_i8.resize(num * padded_dim);
+    for (size_t i = 0; i < num; ++i) {
+        const auto& v = padded[i];
+        int8_t* dst = &flat_i8[i * padded_dim];
+        for (size_t d = 0; d < padded_dim; ++d) {
+            float mn = minv[d], mx = maxv[d];
+            float c = 0.5f * (mn + mx);
+            float r = std::max(mx - c, c - mn);
+            if (r <= 1e-12f) { dst[d] = 0; continue; }
+            float norm = (v[d] - c) * (127.0f / r);
+            int q = static_cast<int>(std::round(norm));
+            if (q < -128) q = -128; else if (q > 127) q = 127;
+            dst[d] = static_cast<int8_t>(q);
+        }
+    }
+}
+
 // AVX2: FP32 L2 距离（回退标量实现）
 static inline float l2_distance_avx2(const float* a, const float* b, size_t dim) {
 #ifdef __AVX2__
@@ -343,6 +405,63 @@ void build_large_bucket_bqgraph(
         std::remove(tmp_graph.c_str());
 
         // 4) 用 BQ 节点向量 + DiskANN 邻接写出最终图
+        std::ofstream gout(out_graph_path, std::ios::binary);
+        if (!gout.is_open()) return;
+        uint64_t pd = padded_dim, bits = bq_bits, n = num, deg = graph_degree;
+        gout.write(reinterpret_cast<char*>(&pd), sizeof(uint64_t));
+        gout.write(reinterpret_cast<char*>(&bits), sizeof(uint64_t));
+        gout.write(reinterpret_cast<char*>(&n), sizeof(uint64_t));
+        gout.write(reinterpret_cast<char*>(&deg), sizeof(uint64_t));
+        gout.write(reinterpret_cast<const char*>(packed_codes.data()), packed_codes.size());
+        gout.write(reinterpret_cast<const char*>(f_add.data()), sizeof(float) * num);
+        gout.write(reinterpret_cast<const char*>(f_rescale.data()), sizeof(float) * num);
+        if (!ex_blob.empty()) gout.write(reinterpret_cast<const char*>(ex_blob.data()), ex_blob.size());
+        gout.write(reinterpret_cast<const char*>(adj.data()), sizeof(uint32_t) * adj.size());
+        gout.close();
+        return;
+    }
+
+    // 若为 SQ 构图：先做 SQ 量化并反量化为近似浮点，再调用 DiskANN 构建，最终仍以 BQ 写盘
+    if (construct_mode == ConstructQuantization::SQ) {
+        // 1) SQ 量化（8-bit，按维度 min-max 到 uint8），将维度对齐到32以提升SIMD吞吐
+        const size_t sq_dim = ((padded_dim + 31) & ~31ULL);
+        DataSet bucket_padded_sq;
+        if (sq_dim != padded_dim) {
+            pad_dataset(bucket_padded, sq_dim, bucket_padded_sq);
+        } else {
+            bucket_padded_sq = bucket_padded;
+        }
+        // 按环境变量选择量化类型：默认 u8，可设置 SQ_DATA_TYPE=i8 走 int8
+        std::string sq_type = "u8";
+        if (const char* env = std::getenv("SQ_DATA_TYPE")) {
+            std::string v(env);
+            for (auto& c : v) c = (char)std::tolower(c);
+            if (v == "i8") sq_type = "i8";
+        }
+
+        const size_t num_threads = std::max(1u, std::thread::hardware_concurrency());
+        std::string tmp_graph;
+        if (sq_type == "i8") {
+            std::vector<int8_t> flat_i8;
+            quantize_i8_per_dim(bucket_padded_sq, sq_dim, flat_i8);
+            tmp_graph = out_graph_path + ".tmp.i8.vamana.index";
+            build_and_save_vamana_graph_i8(flat_i8, num, sq_dim, {}, tmp_graph, graph_degree, cfg.build_complexity, num_threads);
+        } else {
+            std::vector<uint8_t> flat_u8;
+            quantize_u8_per_dim(bucket_padded_sq, sq_dim, flat_u8);
+            tmp_graph = out_graph_path + ".tmp.u8.vamana.index";
+            build_and_save_vamana_graph_u8(flat_u8, num, sq_dim, {}, tmp_graph, graph_degree, cfg.build_complexity, num_threads);
+        }
+ 
+        // 3) 读取邻接表
+        auto adj_vecs = get_graph_neighbors(tmp_graph, num, graph_degree);
+        std::vector<uint32_t> adj; adj.reserve(num * graph_degree);
+        for (const auto& row : adj_vecs) adj.insert(adj.end(), row.begin(), row.end());
+
+        // 4) 移除临时文件
+        std::remove(tmp_graph.c_str());
+
+        // 5) 用 BQ 节点向量 + DiskANN 邻接写出最终图
         std::ofstream gout(out_graph_path, std::ios::binary);
         if (!gout.is_open()) return;
         uint64_t pd = padded_dim, bits = bq_bits, n = num, deg = graph_degree;

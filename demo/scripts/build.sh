@@ -28,7 +28,7 @@ BQ_SATURATE_PASS="${BQ_SATURATE_PASS:-1}"        # 轻量互连/饱和微修复�
 # 新增：构图量化模式（仅在 USE_BQ=1 时生效）
 # 可选值：bq (使用BQ向量构图), sq (使用SQ向量构图), no_quantization (使用全精度向量构图)
 # 注意：无论使用哪种模式，最终保存的图都是 BQ 压缩格式
-CONSTRUCT_QUANTIZATION="${CONSTRUCT_QUANTIZATION:-no_quantization}"
+CONSTRUCT_QUANTIZATION="${CONSTRUCT_QUANTIZATION:-bq}"
 # =====================================
 
 # 基本校验
