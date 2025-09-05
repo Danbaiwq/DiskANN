@@ -1603,4 +1603,9 @@ std::vector<uint32_t> generate_bq_candidates(
     std::vector<uint32_t> cand_ids; cand_ids.reserve(candidates.size());
     for (auto& p : candidates) cand_ids.push_back(p.second);
     return cand_ids;
-} 
+}
+
+// 导出供 pipeline 复用的 SIMD 距离接口
+float l2_distance_simd(const float* a, const float* b, size_t dim) {
+    return l2_distance_sqr_avx2_opt(a, b, dim);
+}

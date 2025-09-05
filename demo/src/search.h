@@ -101,4 +101,7 @@ std::vector<uint32_t> generate_bq_candidates(
     size_t k,
     size_t dim,
     size_t bq_graph_threshold
-); 
+);
+
+// 新增：SIMD 距离计算对外接口（供 pipeline 复用 search.cpp 的实现）
+float l2_distance_simd(const float* a, const float* b, size_t dim); 

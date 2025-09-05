@@ -4,15 +4,18 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <cstring>
+#include <cstdlib>
+#ifdef __GLIBC__
+#include <malloc.h>
+#endif
 
-static inline float l2_distance_sqr_opt(const float* a, const float* b, size_t dim) {
-    // 与 search.cpp 的 avx2 版本保持接口一致（此处简单实现）
-    float sum = 0.0f;
-    for (size_t i = 0; i < dim; ++i) {
-        float d = a[i] - b[i];
-        sum += d * d;
-    }
-    return sum;
+
+static inline bool getenv_bool_or(const char* k, bool defv) {
+    const char* s = std::getenv(k);
+    if (!s) return defv;
+    std::string v(s);
+    for (auto& c : v) c = (char)std::tolower(c);
+    return !(v == "0" || v == "false" || v == "off");
 }
 
 // 前向声明，供回退路径直接调用
@@ -116,8 +119,8 @@ void AIOManager::event_loop(ThreadSafeQueue<std::shared_ptr<QueryContext>>& rera
             ctx_sp->io_requests_completed.fetch_add(1, std::memory_order_relaxed);
             inflight_.fetch_sub(1, std::memory_order_relaxed);
             if (ctx_sp->io_requests_completed.load(std::memory_order_relaxed) == ctx_sp->io_requests_submitted) {
-                // 将每段数据拷贝到 full_precision_vectors 对应行范围，并释放对齐缓冲
-                if (!ctx_sp->aligned_buffers.empty()) {
+                // 若存在 full_precision_vectors（非流式），将段数据拷贝并释放缓冲
+                if (!ctx_sp->full_precision_vectors.empty() && !ctx_sp->aligned_buffers.empty()) {
                     const size_t dim = ctx_sp->dim;
                     const size_t vec_bytes = sizeof(float) * dim;
                     const size_t num_segs = ctx_sp->aligned_buffers.size();
@@ -139,6 +142,7 @@ void AIOManager::event_loop(ThreadSafeQueue<std::shared_ptr<QueryContext>>& rera
                         ctx_sp->aligned_buffers[i] = nullptr;
                     }
                 }
+                // 流式场景：不在 I/O 线程触碰 aligned_buffers，交由 Stage3 直接消费
                 {
                     std::lock_guard<std::mutex> g(map_mtx_);
                     ctx_map_.erase(key);
@@ -209,6 +213,7 @@ static void execute_io_prep(const std::shared_ptr<QueryContext>& ctx, const Pipe
     const size_t batch_mb = read_env_size_t("RERANK_BATCH_MB", 8);
     const size_t batch_bytes_limit = batch_mb * 1024ULL * 1024ULL;
     const size_t gap_gids = read_env_size_t("RERANK_GAP_GIDS", 8);
+    const bool streaming = getenv_bool_or("RERANK_STREAMING", true);
 
     // 计算分段
     struct Segment { off_t aligned_start; size_t inner; size_t aligned_len; uint32_t first_gid; uint32_t last_gid; size_t rows; };
@@ -239,20 +244,74 @@ static void execute_io_prep(const std::shared_ptr<QueryContext>& ctx, const Pipe
     // 分段为空也返回空结果
     if (segs.empty()) { QueryResult out; ctx->final_result = out; ctx->promise.set_value(out); return; }
 
-    // 计算总行数并分配输出
-    size_t rows_total = 0; for (auto& sg : segs) rows_total += sg.rows;
+    // 若预估段总内存超过单查询上限，则直接走流式同步回退
+    size_t per_query_cap_mb = read_env_size_t("PIPELINE_PER_QUERY_MB", 64);
+    if (per_query_cap_mb == 0) per_query_cap_mb = 64;
+    size_t total_bytes = 0; for (auto& sg : segs) total_bytes += sg.aligned_len;
+    // 小 I/O 直接同步读取，避免 AIO 尾部悬挂（尤其 f=1/k=100）
+    size_t aio_min_bytes = read_env_size_t("PIPELINE_AIO_MIN_BYTES", 8 * 1024ULL * 1024ULL);
+    if (streaming && (total_bytes < aio_min_bytes)) {
+        std::vector<std::pair<float, uint32_t>> pairs;
+        pairs.reserve(gids_sorted.size());
+        for (auto& sg : segs) {
+            uint32_t first_gid = sg.first_gid; uint32_t last_gid = sg.last_gid;
+            off_t aligned_start = sg.aligned_start; size_t inner = sg.inner;
+            void* buf = nullptr; if (posix_memalign(&buf, bs, sg.aligned_len) != 0 || buf == nullptr) continue;
+            ssize_t br = ::pread(env.base_fd, buf, sg.aligned_len, aligned_start);
+            if (br == static_cast<ssize_t>(sg.aligned_len)) {
+                const char* base_ptr = static_cast<const char*>(buf) + inner;
+                for (uint32_t gid = first_gid; gid <= last_gid; ++gid) {
+                    size_t rel = static_cast<size_t>(gid - first_gid);
+                    const float* vptr = reinterpret_cast<const float*>(base_ptr + rel * vec_bytes);
+                    float dist = l2_distance_simd(vptr, ctx->original_query.data(), dim);
+                    pairs.emplace_back(dist, gid);
+                }
+            }
+            free(buf);
+        }
+        if (!pairs.empty()) {
+            size_t want = std::min(env.top_k, pairs.size());
+            std::nth_element(pairs.begin(), pairs.begin() + want, pairs.end());
+            pairs.resize(want); std::sort(pairs.begin(), pairs.end());
+            QueryResult out; out.ids.reserve(want); out.distances.reserve(want);
+            for (size_t i = 0; i < want; ++i) { out.distances.push_back(pairs[i].first); out.ids.push_back(pairs[i].second); }
+            ctx->final_result = out; ctx->promise.set_value(out);
+        } else { QueryResult out; ctx->final_result = out; ctx->promise.set_value(out); }
+        return;
+    }
+    if (streaming && total_bytes > per_query_cap_mb * 1024ULL * 1024ULL) {
+        // 直接流式同步读取，避免分配大段 buffer
+        std::vector<std::pair<float, uint32_t>> pairs;
+        pairs.reserve(gids_sorted.size());
+        for (auto& sg : segs) {
+            uint32_t first_gid = sg.first_gid; uint32_t last_gid = sg.last_gid;
+            off_t aligned_start = sg.aligned_start; size_t inner = sg.inner;
+            void* buf = nullptr; if (posix_memalign(&buf, bs, sg.aligned_len) != 0 || buf == nullptr) continue;
+            ssize_t br = ::pread(env.base_fd, buf, sg.aligned_len, aligned_start);
+            if (br == static_cast<ssize_t>(sg.aligned_len)) {
+                const char* base_ptr = static_cast<const char*>(buf) + inner;
+                for (uint32_t gid = first_gid; gid <= last_gid; ++gid) {
+                    size_t rel = static_cast<size_t>(gid - first_gid);
+                    const float* vptr = reinterpret_cast<const float*>(base_ptr + rel * vec_bytes);
+                    float dist = l2_distance_simd(vptr, ctx->original_query.data(), dim);
+                    pairs.emplace_back(dist, gid);
+                }
+            }
+            free(buf);
+        }
+        if (!pairs.empty()) {
+            size_t want = std::min(env.top_k, pairs.size());
+            std::nth_element(pairs.begin(), pairs.begin() + want, pairs.end());
+            pairs.resize(want); std::sort(pairs.begin(), pairs.end());
+            QueryResult out; out.ids.reserve(want); out.distances.reserve(want);
+            for (size_t i = 0; i < want; ++i) { out.distances.push_back(pairs[i].first); out.ids.push_back(pairs[i].second); }
+            ctx->final_result = out; ctx->promise.set_value(out);
+        } else { QueryResult out; ctx->final_result = out; ctx->promise.set_value(out); }
+        return;
+    }
+
     ctx->dim = dim;
     ctx->top_k = env.top_k;
-    ctx->full_precision_vectors.assign(rows_total * dim, 0.0f);
-    ctx->read_gid_order.resize(rows_total);
-
-    // 填充 read_gid_order（按段）
-    size_t row_cursor = 0;
-    for (auto& sg : segs) {
-        for (uint32_t gid = sg.first_gid; gid <= sg.last_gid; ++gid) {
-            ctx->read_gid_order[row_cursor++] = gid;
-        }
-    }
 
     // 为每段准备 iocb + 对齐缓冲
     const size_t num_segs = segs.size();
@@ -262,11 +321,11 @@ static void execute_io_prep(const std::shared_ptr<QueryContext>& ctx, const Pipe
     ctx->inner_offsets.resize(num_segs);
     ctx->segment_first_gids.resize(num_segs);
     ctx->segment_last_gids.resize(num_segs);
-    ctx->segment_row_starts.resize(num_segs);
+    ctx->segment_row_starts.resize(num_segs); // 仅占位
     ctx->iocb_pointers.clear();
     ctx->iocb_pointers.reserve(num_segs);
 
-    row_cursor = 0;
+    size_t row_cursor = 0;
     bool alloc_fail = false;
     for (size_t i = 0; i < num_segs; ++i) {
         auto& sg = segs[i];
@@ -291,30 +350,39 @@ static void execute_io_prep(const std::shared_ptr<QueryContext>& ctx, const Pipe
     }
 
     auto fallback_sync_read = [&]() {
-        // 向量级回退同步读取
-        const size_t rows = ctx->read_gid_order.size();
-        for (size_t r = 0; r < rows; ++r) {
-            uint32_t gid = ctx->read_gid_order[r];
-            if (gid >= env.vector_offsets.size()) continue;
-            off_t off = static_cast<off_t>(env.vector_offsets[gid]);
-            off_t aligned_start = (off / static_cast<off_t>(bs)) * static_cast<off_t>(bs);
-            size_t inner = static_cast<size_t>(off - aligned_start);
-            size_t aligned_len = (inner + vec_bytes + (bs - 1)) & ~(bs - 1);
-            void* buf = nullptr;
-            if (posix_memalign(&buf, bs, aligned_len) != 0 || buf == nullptr) {
-                // 彻底失败，返回空结果
-                continue;
-            }
+        // 流式回退同步读取并直接复排（不分配全量矩阵）
+        std::vector<std::pair<float, uint32_t>> pairs;
+        pairs.reserve(row_cursor);
+        for (size_t i = 0; i < num_segs; ++i) {
+            uint32_t first_gid = ctx->segment_first_gids[i];
+            uint32_t last_gid  = ctx->segment_last_gids[i];
+            off_t base_off = static_cast<off_t>(env.vector_offsets[first_gid]);
+            off_t aligned_start = (base_off / static_cast<off_t>(bs)) * static_cast<off_t>(bs);
+            size_t inner = static_cast<size_t>(base_off - aligned_start);
+            size_t aligned_len = (inner + (last_gid - first_gid + 1) * vec_bytes + (bs - 1)) & ~(bs - 1);
+            void* buf = nullptr; if (posix_memalign(&buf, bs, aligned_len) != 0 || buf == nullptr) continue;
             ssize_t br = ::pread(env.base_fd, buf, aligned_len, aligned_start);
             if (br == static_cast<ssize_t>(aligned_len)) {
-                const char* p = static_cast<const char*>(buf) + inner;
-                float* dst = ctx->full_precision_vectors.data() + r * dim;
-                std::memcpy(dst, p, vec_bytes);
+                const char* base_ptr = static_cast<const char*>(buf) + inner;
+                for (uint32_t gid = first_gid; gid <= last_gid; ++gid) {
+                    size_t rel = static_cast<size_t>(gid - first_gid);
+                    const float* vptr = reinterpret_cast<const float*>(base_ptr + rel * vec_bytes);
+                    float dist = l2_distance_simd(vptr, ctx->original_query.data(), dim);
+                    pairs.emplace_back(dist, gid);
+                }
             }
             free(buf);
         }
-        // 直接在当前线程完成复排
-        execute_rerank(ctx, env);
+        if (!pairs.empty()) {
+            size_t want = std::min(env.top_k, pairs.size());
+            std::nth_element(pairs.begin(), pairs.begin() + want, pairs.end());
+            pairs.resize(want); std::sort(pairs.begin(), pairs.end());
+            QueryResult out; out.ids.reserve(want); out.distances.reserve(want);
+            for (size_t i = 0; i < want; ++i) { out.distances.push_back(pairs[i].first); out.ids.push_back(pairs[i].second); }
+            ctx->final_result = out; ctx->promise.set_value(out);
+        } else {
+            QueryResult out; ctx->final_result = out; ctx->promise.set_value(out);
+        }
     };
 
     if (alloc_fail) { fallback_sync_read(); return; }
@@ -329,6 +397,41 @@ static void execute_io_prep(const std::shared_ptr<QueryContext>& ctx, const Pipe
 static void execute_rerank(const std::shared_ptr<QueryContext>& ctx, const PipelineEnv& env) {
     QueryResult out;
     const size_t dim = ctx->dim;
+    const bool streaming = getenv_bool_or("RERANK_STREAMING", true);
+
+    if (streaming && !ctx->aligned_buffers.empty()) {
+        // 直接在段缓冲上计算距离
+        const size_t vec_bytes = sizeof(float) * dim;
+        std::vector<std::pair<float, uint32_t>> pairs;
+        size_t rows_total = 0; for (size_t i = 0; i < ctx->segment_first_gids.size(); ++i) rows_total += (ctx->segment_last_gids[i] - ctx->segment_first_gids[i] + 1);
+        pairs.reserve(rows_total);
+        for (size_t i = 0; i < ctx->aligned_buffers.size(); ++i) {
+            void* big_buf = ctx->aligned_buffers[i]; if (!big_buf) continue;
+            size_t inner = (i < ctx->inner_offsets.size()) ? ctx->inner_offsets[i] : 0;
+            uint32_t first_gid = ctx->segment_first_gids[i];
+            uint32_t last_gid  = ctx->segment_last_gids[i];
+            const char* base_ptr = static_cast<const char*>(big_buf) + inner;
+            for (uint32_t gid = first_gid; gid <= last_gid; ++gid) {
+                size_t rel = static_cast<size_t>(gid - first_gid);
+                const float* vptr = reinterpret_cast<const float*>(base_ptr + rel * vec_bytes);
+                float dist = l2_distance_simd(vptr, ctx->original_query.data(), dim);
+                pairs.emplace_back(dist, gid);
+            }
+        }
+        // 释放段缓冲
+        for (void*& p : ctx->aligned_buffers) { if (p) { free(p); p = nullptr; } }
+        if (!pairs.empty()) {
+            size_t want = std::min(ctx->top_k, pairs.size());
+            std::nth_element(pairs.begin(), pairs.begin() + want, pairs.end());
+            pairs.resize(want); std::sort(pairs.begin(), pairs.end());
+            out.ids.reserve(want); out.distances.reserve(want);
+            for (size_t i = 0; i < want; ++i) { out.distances.push_back(pairs[i].first); out.ids.push_back(pairs[i].second); }
+        }
+        ctx->final_result = out; ctx->promise.set_value(out);
+        return;
+    }
+
+    // 非 streaming：旧路径（如有 full_precision_vectors）
     if (dim == 0 || ctx->full_precision_vectors.empty()) {
         ctx->promise.set_value(out);
         return;
@@ -338,7 +441,7 @@ static void execute_rerank(const std::shared_ptr<QueryContext>& ctx, const Pipel
     std::vector<std::pair<float, uint32_t>> pairs; pairs.reserve(rows);
     for (size_t i = 0; i < rows; ++i) {
         const float* v = ctx->full_precision_vectors.data() + i * dim;
-        float d = l2_distance_sqr_opt(q, v, dim);
+        float d = l2_distance_simd(q, v, dim);
         uint32_t gid = (i < ctx->read_gid_order.size()) ? ctx->read_gid_order[i] : static_cast<uint32_t>(i);
         pairs.emplace_back(d, gid);
     }
@@ -363,23 +466,29 @@ static void shared_worker_loop(ThreadSafeQueue<std::shared_ptr<QueryContext>>& s
                                ThreadSafeQueue<std::shared_ptr<QueryContext>>& stage3,
                                const PipelineEnv& env,
                                std::atomic<bool>& stop_flag) {
+    using namespace std::chrono_literals;
     while (true) {
         if (stop_flag.load(std::memory_order_relaxed) && stage1.empty() && stage2.empty() && stage3.empty()) break;
         std::shared_ptr<QueryContext> ctx;
-        if (stage3.try_pop(ctx)) {
+        if (stage3.wait_pop(ctx, 1ms)) {
             execute_rerank(ctx, env);
             continue;
         }
-        if (stage2.try_pop(ctx)) {
+        if (stage2.wait_pop(ctx, 1ms)) {
             execute_io_prep(ctx, env);
             continue;
         }
-        if (stage1.try_pop(ctx)) {
+        if (stage1.wait_pop(ctx, 1ms)) {
             execute_candidate_generation(ctx, stage2, env);
             continue;
         }
-        std::this_thread::yield();
     }
+}
+
+static size_t getenv_size_t_or(const char* k, size_t defv) {
+    const char* s = std::getenv(k);
+    if (!s) return defv;
+    try { return std::stoull(s); } catch (...) { return defv; }
 }
 
 void run_pipeline_search(
@@ -403,26 +512,52 @@ void run_pipeline_search(
     std::thread io_thread([&](){ env.aio_manager.event_loop(*stage3); });
 #endif
 
-    const size_t num_workers = std::max(1u, std::thread::hardware_concurrency());
+    const size_t hw = std::max(1u, std::thread::hardware_concurrency());
+    // 限制工作线程数，避免过多线程导致堆栈/缓冲膨胀
+    size_t worker_cap = getenv_size_t_or("PIPELINE_WORKERS", hw);
+    worker_cap = std::max<size_t>(1, std::min<size_t>(worker_cap, hw));
+    const size_t num_workers = worker_cap;
     std::vector<std::thread> workers;
     workers.reserve(num_workers);
     for (size_t i = 0; i < num_workers; ++i) {
         workers.emplace_back([&, i]() { shared_worker_loop(*stage1, *stage2, *stage3, env, stop_flag); });
     }
 
-    std::vector<std::future<QueryResult>> futs; futs.reserve(num_queries);
-    for (size_t i = 0; i < num_queries; ++i) {
-        auto ctx = std::make_shared<QueryContext>();
-        ctx->query_id = i;
-        ctx->original_query = get_point_copy(queries_flat, i, env.dim);
-        auto fut = ctx->promise.get_future();
-        futs.emplace_back(std::move(fut));
-        stage1->push(ctx);
-    }
-
     out_results.resize(num_queries);
-    for (size_t i = 0; i < num_queries; ++i) {
-        out_results[i] = futs[i].get();
+
+    // 控制最大在途查询数，避免内存线性增长
+    size_t max_inflight = getenv_size_t_or("PIPELINE_MAX_INFLIGHT", hw * 2);
+    if (max_inflight == 0) max_inflight = hw * 2;
+    // 全局内存上限（MB），粗略控制总驻留
+    size_t mem_cap_mb = getenv_size_t_or("PIPELINE_MEM_CAP_MB", 500);
+    if (mem_cap_mb < 100) mem_cap_mb = 100;
+
+    size_t pushed = 0;
+    while (pushed < num_queries) {
+        // 依据全局内存上限估算可并发的查询数（粗略：按每查询 64MB 上限）
+        size_t per_query_mb = getenv_size_t_or("PIPELINE_PER_QUERY_MB", 64);
+        if (per_query_mb == 0) per_query_mb = 64;
+        size_t by_mem = std::max<size_t>(1, mem_cap_mb / per_query_mb);
+        size_t window = std::min(max_inflight, by_mem);
+        const size_t batch = std::min(window, num_queries - pushed);
+        std::vector<std::future<QueryResult>> futs; futs.reserve(batch);
+        for (size_t j = 0; j < batch; ++j) {
+            auto ctx = std::make_shared<QueryContext>();
+            ctx->query_id = pushed + j;
+            ctx->original_query = get_point_copy(queries_flat, pushed + j, env.dim);
+            auto fut = ctx->promise.get_future();
+            futs.emplace_back(std::move(fut));
+            stage1->push(ctx);
+        }
+        // 收集本批结果
+        for (size_t j = 0; j < batch; ++j) {
+            out_results[pushed + j] = futs[j].get();
+        }
+#ifdef __GLIBC__
+        // 尝试归还未使用内存给操作系统，缓解 RSS 持续上升
+        malloc_trim(0);
+#endif
+        pushed += batch;
     }
 
     stop_flag.store(true, std::memory_order_relaxed);

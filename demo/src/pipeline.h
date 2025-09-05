@@ -9,6 +9,7 @@
 #include <mutex>
 #include <deque>
 #include <unordered_map>
+#include <chrono>
 
 #include "utils.h"
 #include "search.h"
@@ -73,6 +74,15 @@ public:
 
     bool try_pop(T& out) {
         std::lock_guard<std::mutex> g(m_);
+        if (q_.empty()) return false;
+        out = std::move(q_.front());
+        q_.pop_front();
+        return true;
+    }
+
+    bool wait_pop(T& out, std::chrono::milliseconds timeout) {
+        std::unique_lock<std::mutex> lk(m_);
+        if (!cv_.wait_for(lk, timeout, [&]{ return closed_ || !q_.empty(); })) return false;
         if (q_.empty()) return false;
         out = std::move(q_.front());
         q_.pop_front();
