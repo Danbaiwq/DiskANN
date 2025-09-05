@@ -1461,4 +1461,146 @@ void save_cluster_access_stats(const std::string& filename) {
     }
     out.close();
     std::cout << "Cluster access statistics saved to: " << filename << std::endl;
+}
+
+std::vector<uint32_t> generate_bq_candidates(
+    const std::vector<float>& query,
+    diskann::Index<float, uint32_t, uint32_t>& medoid_index,
+    const Buckets& buckets,
+    size_t f,
+    size_t k,
+    size_t dim,
+    size_t bq_graph_threshold
+) {
+    // 懒加载全局 BQ 缓存（与 search_two_stage 一致）
+    static std::once_flag s_once2;
+    std::call_once(s_once2, [](){
+        size_t bucket_mb = 256, graph_mb = 256;
+        if (const char* env = std::getenv("BQ_BUCKET_CACHE_MB")) { try { bucket_mb = std::stoul(env); } catch (...) {} }
+        if (const char* env = std::getenv("BQ_GRAPH_CACHE_MB"))  { try { graph_mb  = std::stoul(env); } catch (...) {} }
+        g_bq_bucket_cache = std::make_unique<BQBucketCache>(bucket_mb * 1024ULL * 1024ULL);
+        g_bq_graph_cache  = std::make_unique<BQGraphCache>( graph_mb * 1024ULL * 1024ULL);
+    });
+
+    // 初始化簇访问统计
+    if (cluster_stats_enabled()) {
+        std::call_once(g_stats_init_flag, [&](){
+            if (!g_cluster_access_counts) {
+                g_cluster_count = buckets.size();
+                g_cluster_access_counts = std::make_unique<std::atomic<uint64_t>[]>(g_cluster_count);
+                for (size_t i = 0; i < g_cluster_count; ++i) {
+                    g_cluster_access_counts[i].store(0, std::memory_order_relaxed);
+                }
+            }
+        });
+    }
+
+    // 质心图获取前 f 个桶
+    std::vector<uint32_t> nearest_bucket_ids(f);
+    medoid_index.search(query.data(), f, f, nearest_bucket_ids.data(), nullptr);
+
+    std::vector<std::pair<float, uint32_t>> candidates;
+    std::set<uint32_t> visited_ids;
+
+    for (uint32_t bucket_id : nearest_bucket_ids) {
+        // 统计簇访问
+        if (cluster_stats_enabled() && g_cluster_access_counts && bucket_id < g_cluster_count) {
+            g_cluster_access_counts[bucket_id].fetch_add(1, std::memory_order_relaxed);
+        }
+        const size_t bucket_size = buckets[bucket_id].size();
+        if (bucket_size >= bq_graph_threshold) {
+            std::shared_ptr<const BQGraphData> gp;
+            if (g_bq_graph_cache) {
+                gp = g_bq_graph_cache->get_or_load(bucket_id, [&](BQGraphData& dst){ return load_bq_graph(bucket_id, dst); });
+            }
+            BQGraphData localG; const BQGraphData* G = nullptr;
+            if (gp) G = gp.get(); else { if (load_bq_graph(bucket_id, localG)) G = &localG; }
+            if (G && G->num_points > 0) {
+                std::vector<std::pair<float, uint32_t>> local_cand;
+                bq_graph_search_loaded(*G, query, dim, k, local_cand);
+                if (!local_cand.empty()) {
+                    for (auto& p : local_cand) {
+                        uint32_t local_idx = p.second;
+                        if (local_idx < buckets[bucket_id].size()) {
+                            uint32_t global_id = buckets[bucket_id][local_idx];
+                            if (visited_ids.insert(global_id).second) {
+                                candidates.emplace_back(p.first, global_id);
+                            }
+                        }
+                    }
+                    continue;
+                }
+            }
+        }
+        // 小桶或未加载图：使用 bq.bin 扫描
+        std::shared_ptr<const BQBucketData> bp;
+        if (g_bq_bucket_cache) {
+            bp = g_bq_bucket_cache->get_or_load(bucket_id, [&](BQBucketData& dst){ return load_bq_bucket(bucket_id, dst); });
+        }
+        BQBucketData localB; const BQBucketData* bd = nullptr;
+        if (bp) bd = bp.get(); else { if (load_bq_bucket(bucket_id, localB)) bd = &localB; }
+        if (!bd || bd->num_points == 0) continue;
+
+        size_t code_cols = bd->padded_dim / 8;
+        size_t num = bd->num_points;
+
+        std::vector<float> q_pad(bd->padded_dim, 0.0f);
+        std::copy(query.begin(), query.end(), q_pad.begin());
+
+        size_t ex_bits = bd->bits > 1 ? (bd->bits - 1) : 0;
+        rabitqlib::SplitBatchQuery<float> qobj(q_pad.data(), bd->padded_dim, ex_bits, rabitqlib::METRIC_L2, false);
+        float qnorm2 = 0.0f; for (size_t d = 0; d < dim; ++d) qnorm2 += query[d] * query[d];
+        float qnorm = std::sqrt(qnorm2);
+        qobj.set_g_add(qnorm, 0.0f);
+
+        std::vector<std::pair<float, uint32_t>> local_cand;
+        local_cand.reserve(std::min(k, num));
+        std::array<uint16_t, rabitqlib::fastscan::kBatchSize> accu{};
+        size_t num_rd = (num + 31) & ~31ULL;
+        size_t batches = num_rd / 32;
+        for (size_t b = 0; b < batches; ++b) {
+            const uint8_t* codes = bd->bin_codes.data() + b * (code_cols * 32);
+            rabitqlib::fastscan::accumulate(codes, qobj.lut(), accu.data(), bd->padded_dim);
+            size_t base = b * 32;
+            size_t batch = std::min<size_t>(32, num - base);
+            for (size_t i = 0; i < batch; ++i) {
+                size_t idx = base + i;
+                float ip_est = qobj.delta() * static_cast<float>(accu[i]) + qobj.sum_vl_lut();
+                float dist_est = bd->f_add[idx] + qobj.g_add() + bd->f_rescale[idx] * (ip_est + qobj.k1xsumq());
+                if (bd->bits > 1 && !bd->ex_blob.empty()) {
+                    size_t ex_bits2 = bd->bits - 1;
+                    size_t ex_stride = rabitqlib::ExDataMap<float>::data_bytes(bd->padded_dim, ex_bits2);
+                    const char* ex_ptr = reinterpret_cast<const char*>(bd->ex_blob.data()) + (idx * ex_stride);
+                    auto ip_func = rabitqlib::select_excode_ipfunc(ex_bits2);
+                    rabitqlib::ConstExDataMap<float> ex_map(ex_ptr, bd->padded_dim, ex_bits2);
+                    float ex_dist = ex_map.f_add_ex() + qobj.g_add() + (ex_map.f_rescale_ex() *
+                        (static_cast<float>(1 << ex_bits2) * (ip_est) + ip_func(q_pad.data(), ex_map.ex_code(), bd->padded_dim) + qobj.kbxsumq()));
+                    dist_est = ex_dist;
+                }
+                local_cand.emplace_back(dist_est, static_cast<uint32_t>(idx));
+            }
+        }
+        size_t want = std::min(k, local_cand.size());
+        if (local_cand.size() > want) {
+            std::nth_element(local_cand.begin(), local_cand.begin() + want, local_cand.end());
+            local_cand.resize(want);
+        } else {
+            std::sort(local_cand.begin(), local_cand.end());
+        }
+        for (auto& p : local_cand) {
+            uint32_t local_idx = p.second;
+            if (local_idx < buckets[bucket_id].size()) {
+                uint32_t global_id = buckets[bucket_id][local_idx];
+                if (visited_ids.insert(global_id).second) {
+                    candidates.emplace_back(p.first, global_id);
+                }
+            }
+        }
+    }
+
+    // 排序并返回全局ID（可保留估计距离排序）
+    std::sort(candidates.begin(), candidates.end());
+    std::vector<uint32_t> cand_ids; cand_ids.reserve(candidates.size());
+    for (auto& p : candidates) cand_ids.push_back(p.second);
+    return cand_ids;
 } 

@@ -16,6 +16,7 @@
 #include "vamana_graph.h"
 #include "search.h"
 #include "build.h"
+#include "pipeline.h"
 
 // rabitq 量化接口（构建阶段用）
 #include "/home/danbai.wq/DiskANN/rabitq/rabitqlib/quantization/rabitq.hpp"
@@ -66,7 +67,7 @@ void build_mode(const std::string& data_path) {
 
     // --- Parameters ---
     const float alpha = 0.01f;
-    const size_t m = 256;
+    const size_t m = 1024;
     const int t = 8;
     const int l = 10;
     const float beta = 1.6f;  // 新增：距离比例约束参数
@@ -127,6 +128,23 @@ void build_mode(const std::string& data_path) {
     FlatDataSet full_dataset_flat = load_fbin_flat(data_path, num_points, dim);
     if (full_dataset_flat.empty()) {
         return;
+    }
+
+    // 生成 vector_offsets.bin（uint64_t 数组），记录每个向量在原始 .fbin 文件中的字节偏移
+    {
+        std::ofstream off_writer(resolve_write_path("vector_offsets.bin"), std::ios::binary);
+        if (off_writer.is_open()) {
+            const uint64_t header_bytes = sizeof(uint32_t) * 2;
+            const uint64_t vec_bytes = static_cast<uint64_t>(sizeof(float)) * static_cast<uint64_t>(dim);
+            for (uint64_t gid = 0; gid < static_cast<uint64_t>(num_points); ++gid) {
+                uint64_t off = header_bytes + gid * vec_bytes;
+                off_writer.write(reinterpret_cast<const char*>(&off), sizeof(uint64_t));
+            }
+            off_writer.close();
+            std::cout << "vector_offsets.bin written (" << num_points << " offsets)." << std::endl;
+        } else {
+            std::cerr << "Failed to write vector_offsets.bin" << std::endl;
+        }
     }
 
     // --- 分布式多轮 mini-batch KMeans ---
@@ -263,8 +281,9 @@ void build_mode(const std::string& data_path) {
     std::cout << "Building and saving Vamana graphs for each bucket..." << std::endl;
     
     // 计算合理的并行度
-    const size_t max_parallel_buckets = std::max(1UL, max_threads);  // 同时构建的bucket数量
-    const size_t threads_per_bucket = std::max(1UL, max_threads / max_parallel_buckets);  // 每个bucket的线程数
+    const size_t max_threads_build = std::thread::hardware_concurrency();
+    const size_t max_parallel_buckets = std::max(1UL, max_threads_build);  // 同时构建的bucket数量
+    const size_t threads_per_bucket = std::max(1UL, max_threads_build / max_parallel_buckets);  // 每个bucket的线程数
     
     std::cout << "Parallel bucket building: " << max_parallel_buckets << " buckets simultaneously, " 
               << threads_per_bucket << " threads per bucket" << std::endl;
@@ -446,13 +465,74 @@ void search_mode(const std::string& query_path, const std::string& gt_path) {
     std::cout << "\n--- Starting Search Evaluation ---" << std::endl;
     for (size_t f_val : f_values) {
         std::vector<QueryResult> results(num_queries);
-        
         auto start_time = std::chrono::high_resolution_clock::now();
+
+#if defined(HAS_LIBAIO)
+        bool pipeline_ok = true; // 现在默认尝试流水线（BQ/非BQ 通用）
+        // 加载 offsets 和 base.fbin
+        std::vector<uint64_t> offsets;
+        {
+            std::ifstream in(resolve_read_path("vector_offsets.bin"), std::ios::binary);
+            if (!in.is_open()) {
+                pipeline_ok = false;
+            } else {
+                in.seekg(0, std::ios::end);
+                size_t sz = static_cast<size_t>(in.tellg());
+                in.seekg(0, std::ios::beg);
+                offsets.resize(sz / sizeof(uint64_t));
+                in.read(reinterpret_cast<char*>(offsets.data()), sz);
+            }
+        }
+        int base_fd = -1;
+        if (pipeline_ok) {
+            std::string base_path = get_env_str("BASE_FBIN");
+            if (base_path.empty()) pipeline_ok = false;
+            else {
+                // 根据环境变量决定是否使用 O_DIRECT
+                bool force_odirect = true;
+                if (const char* env_od = std::getenv("RERANK_O_DIRECT")) {
+                    std::string v(env_od);
+                    if (v == "0" || v == "false" || v == "False") force_odirect = false;
+                }
+                int flags = O_RDONLY | (force_odirect ? O_DIRECT : 0);
+                base_fd = ::open(base_path.c_str(), flags);
+                if (base_fd < 0 && force_odirect) {
+                    // 若 O_DIRECT 打开失败，回退普通打开
+                    base_fd = ::open(base_path.c_str(), O_RDONLY);
+                }
+                if (base_fd < 0) pipeline_ok = false;
+            }
+        }
+        if (pipeline_ok) {
+            // 初始化 AIO 管理器
+            AIOManager aio(256);
+            PipelineEnv env{
+                *medoid_index, buckets, bucket_index_cache,
+                dim, static_cast<size_t>(f_val), static_cast<size_t>(k), top_k,
+                (use_bq_flag == 1), bq_graph_threshold,
+                offsets, base_fd, aio
+            };
+            ThreadSafeQueue<std::shared_ptr<QueryContext>>* s1=nullptr; 
+            ThreadSafeQueue<std::shared_ptr<QueryContext>>* s2=nullptr; 
+            ThreadSafeQueue<std::shared_ptr<QueryContext>>* s3=nullptr;
+            run_pipeline_search(queries_flat, num_queries, env, results, s1, s2, s3);
+            if (base_fd >= 0) ::close(base_fd);
+        } else {
+            // 回退到原 OMP 路径
+            #pragma omp parallel for
+            for (size_t i = 0; i < num_queries; ++i) {
+                DataPoint query = get_point_copy(queries_flat, i, dim);
+                results[i] = search_two_stage(query, *medoid_index, buckets, f_val, k, top_k, bucket_index_cache, dim, use_bq_flag == 1, bq_graph_threshold);
+            }
+        }
+#else
         #pragma omp parallel for
         for (size_t i = 0; i < num_queries; ++i) {
             DataPoint query = get_point_copy(queries_flat, i, dim);
             results[i] = search_two_stage(query, *medoid_index, buckets, f_val, k, top_k, bucket_index_cache, dim, use_bq_flag == 1, bq_graph_threshold);
         }
+#endif
+
         auto end_time = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> diff = end_time - start_time;
         double qps = num_queries / diff.count();

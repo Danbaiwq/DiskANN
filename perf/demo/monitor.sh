@@ -17,12 +17,10 @@ DEMO_BIN="${DEMO_BIN:-$REPO_ROOT/build/demo/demo_test}"
 INDEX_DIR="${INDEX_DIR:-/data/1/demo}"
 
 # 查询数据与评测 GT 路径（请设置为实际文件）
-QUERY_FBIN="${QUERY_FBIN:-$REPO_ROOT/build/data/gist_query.fbin}"            # 例：/data/sift_query.fbin
-GROUNDTRUTH_IVECS="${GROUNDTRUTH_IVECS:-$REPO_ROOT/build/data/gist_query_base_gt100}"  # 例：/data/sift_query_learn_gt100
+QUERY_FBIN="${QUERY_FBIN:-/data/dataset/gist/gist_query.fbin}"            # 例：/data/sift_query.fbin
+GROUNDTRUTH_IVECS="${GROUNDTRUTH_IVECS:-/data/dataset/gist/gist_query_base_gt100}"  # 例：/data/sift_query_learn_gt100
 # 原始向量库（用于真距复排）
-BASE_FBIN="${BASE_FBIN:-$REPO_ROOT/build/data/gist_base.fbin}"
-# 复排 I/O 模式（默认开启 O_DIRECT）
-RERANK_O_DIRECT="${RERANK_O_DIRECT:-1}"
+BASE_FBIN="${BASE_FBIN:-/data/dataset/gist/gist_base.fbin}"
 
 # 查询参数（可按需调整）
 BQ_GRAPH_THRESHOLD="${BQ_GRAPH_THRESHOLD:-16000}"  # >= 阈值走 bqgraph，否则 bq.bin fastscan
@@ -32,7 +30,7 @@ BQ_SEEDS="${BQ_SEEDS:-8}"                       # bqgraph 的入口点数
 RERANK_USE_MMAP="${RERANK_USE_MMAP:-0}"
 
 # 新增：查询参数 F 与 K
-DEMO_F_PARAM="${DEMO_F_PARAM:-4}"
+DEMO_F_PARAM="${DEMO_F_PARAM:-1}"
 DEMO_K_PARAM="${DEMO_K_PARAM:-100}"
 
 # 新增：BQ 缓存内存预算（MB）
@@ -48,12 +46,13 @@ RERANK_BATCH_MB="${RERANK_BATCH_MB:-32}"          # 每段最大读取字节数�
 RERANK_GAP_GIDS="${RERANK_GAP_GIDS:-16}"          # 合并段允许的 gid 间隙（行数）
 
 # 新增：并行与异步 I/O 参数（任务 4 & 任务 5）
+RERANK_O_DIRECT="${RERANK_O_DIRECT:-1}"
 RERANK_IO_THREADS="${RERANK_IO_THREADS:-16}"       # >1 启用线程池并行 pread（如 4/8）和libaio的线程池
 RERANK_IO_URING="${RERANK_IO_URING:-0}"           # 1 启用 io_uring 异步 I/O（需 liburing）
 RERANK_URING_DEPTH="${RERANK_URING_DEPTH:-128}"    # io_uring 队列深度
 # 新增：libaio 异步 I/O（兼容旧内核）
 RERANK_LIBAIO="${RERANK_LIBAIO:-0}"               # 1 启用 libaio（需 libaio）
-RERANK_AIO_DEPTH="${RERANK_AIO_DEPTH:-256}"        # libaio 队列深度
+RERANK_AIO_DEPTH="${RERANK_AIO_DEPTH:-128}"        # libaio 队列深度
 
 # 新增：提示构建时使用的模式（虽然搜索时不需要，但帮助用户了解）
 CONSTRUCT_QUANTIZATION="${CONSTRUCT_QUANTIZATION:-bq}"  # 仅用于展示
@@ -83,7 +82,6 @@ cat <<EOF
 [demo search] query.fbin         : $QUERY_FBIN
 [demo search] groundtruth.ivecs  : $GROUNDTRUTH_IVECS
 [demo search] base.fbin          : $BASE_FBIN
-[demo search] RERANK_O_DIRECT    : $RERANK_O_DIRECT
 [demo search] RERANK_USE_MMAP    : $RERANK_USE_MMAP
 [demo search] BQ_GRAPH_THRESHOLD : $BQ_GRAPH_THRESHOLD
 [demo search] BQ_EF_SEARCH       : $BQ_EF_SEARCH

@@ -9,7 +9,7 @@ find_package(Threads REQUIRED)
 find_package(OpenMP REQUIRED)
 
 # Define the executable target first
-add_executable(demo_test src/main.cpp src/utils.cpp src/kmeans.cpp src/vamana_graph.cpp src/search.cpp src/build.cpp)
+add_executable(demo_test src/main.cpp src/utils.cpp src/kmeans.cpp src/vamana_graph.cpp src/search.cpp src/build.cpp src/pipeline.cpp)
 
 # --- Sanity check: Print the include path that will be used ---
 message(STATUS "[Demo] Calculated include path: ${CMAKE_CURRENT_SOURCE_DIR}/../include")

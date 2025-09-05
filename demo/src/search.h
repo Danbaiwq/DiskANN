@@ -90,4 +90,15 @@ void save_cluster_access_stats(const std::string& filename);
 void clear_bq_caches();
 
 // 释放簇访问统计占用的全局内存
-void release_cluster_access_stats(); 
+void release_cluster_access_stats();
+
+// 新增：生成 BQ 候选的工具函数（供异步流水线 Stage1 调用）
+std::vector<uint32_t> generate_bq_candidates(
+    const std::vector<float>& query,
+    diskann::Index<float, uint32_t, uint32_t>& medoid_index,
+    const Buckets& buckets,
+    size_t f,
+    size_t k,
+    size_t dim,
+    size_t bq_graph_threshold
+); 

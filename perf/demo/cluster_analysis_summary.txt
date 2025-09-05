@@ -1,20 +1,20 @@
 Cluster Vector Distribution Summary
 ========================================
-Total Clusters: 256
-Total Vectors: 7676522
-Mean Vectors/Cluster: 29986.4141
-Standard Deviation: 14638.8863
-Variance: 214296992.0629
-Minimum: 18
-Maximum: 39062
-Median: 39062.0000
-Coeff. of Variation: 48.8184%
+Total Clusters: 1024
+Total Vectors: 6451763
+Mean Vectors/Cluster: 6300.5498
+Standard Deviation: 4346.5868
+Variance: 18892816.5424
+Minimum: 1
+Maximum: 9765
+Median: 9765.0000
+Coeff. of Variation: 68.9874%
 
 Percentile Information:
-  10th percentile: 1680.00
-  25th percentile: 19868.75
-  50th percentile: 39062.00
-  75th percentile: 39062.00
-  90th percentile: 39062.00
-  95th percentile: 39062.00
-  99th percentile: 39062.00
+  10th percentile: 102.30
+  25th percentile: 824.75
+  50th percentile: 9765.00
+  75th percentile: 9765.00
+  90th percentile: 9765.00
+  95th percentile: 9765.00
+  99th percentile: 9765.00
