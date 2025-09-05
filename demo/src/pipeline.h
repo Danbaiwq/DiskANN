@@ -10,6 +10,8 @@
 #include <deque>
 #include <unordered_map>
 #include <chrono>
+#include <thread>
+#include <new>
 
 #include "utils.h"
 #include "search.h"
@@ -59,59 +61,138 @@ struct QueryContext {
     std::promise<QueryResult> promise;
 };
 
-// 线程安全队列（带关闭）
+// 帮助函数：上取整到 2 的幂
+static inline size_t roundup_pow2(size_t x) {
+    if (x < 2) return 2;
+    --x;
+    x |= x >> 1; x |= x >> 2; x |= x >> 4; x |= x >> 8; x |= x >> 16;
+#if SIZE_MAX > 0xFFFFFFFFu
+    x |= x >> 32;
+#endif
+    return x + 1;
+}
+
+// 无锁有界 MPMC 环形队列（基于 Vyukov 算法），带简易唤醒
+// 接口保持与原 ThreadSafeQueue 一致
 template <typename T>
 class ThreadSafeQueue {
 public:
-    void push(T v) {
-        {
-            std::lock_guard<std::mutex> g(m_);
-            if (closed_) return;
-            q_.emplace_back(std::move(v));
+    explicit ThreadSafeQueue(size_t capacity = 8192) {
+        capacity_ = roundup_pow2(capacity);
+        mask_ = capacity_ - 1;
+        // 手动分配 Node 数组，避免 std::vector 在扩容/移动时对 std::atomic 的不兼容
+        buffer_ = static_cast<Node*>(::operator new[](capacity_ * sizeof(Node)));
+        for (size_t i = 0; i < capacity_; ++i) {
+            new (&buffer_[i]) Node();
+            buffer_[i].seq.store(i, std::memory_order_relaxed);
         }
-        cv_.notify_one();
+        head_.store(0, std::memory_order_relaxed);
+        tail_.store(0, std::memory_order_relaxed);
+        closed_.store(false, std::memory_order_relaxed);
+        avail_.store(0, std::memory_order_relaxed);
+    }
+
+    ~ThreadSafeQueue() {
+        if (buffer_) {
+            for (size_t i = 0; i < capacity_; ++i) {
+                buffer_[i].~Node();
+            }
+            ::operator delete[](buffer_);
+            buffer_ = nullptr;
+        }
+    }
+
+    bool push(T v) {
+        if (closed_.load(std::memory_order_acquire)) return false;
+        size_t pos;
+        Node* node;
+        for (;;) {
+            pos = tail_.load(std::memory_order_acquire);
+            node = &buffer_[pos & mask_];
+            size_t seq = node->seq.load(std::memory_order_acquire);
+            intptr_t dif = (intptr_t)seq - (intptr_t)pos;
+            if (dif == 0) {
+                if (tail_.compare_exchange_weak(pos, pos + 1, std::memory_order_acq_rel)) break;
+            } else if (dif < 0) {
+                // 满，短暂让步
+                std::this_thread::yield();
+                if (closed_.load(std::memory_order_acquire)) return false;
+            } else {
+                // 其他生产者推进，重试
+                std::this_thread::yield();
+            }
+        }
+        node->value = std::move(v);
+        node->seq.store(pos + 1, std::memory_order_release);
+        avail_.fetch_add(1, std::memory_order_release);
+        {
+            std::lock_guard<std::mutex> lk(cv_mtx_);
+            cv_.notify_one();
+        }
+        return true;
     }
 
     bool try_pop(T& out) {
-        std::lock_guard<std::mutex> g(m_);
-        if (q_.empty()) return false;
-        out = std::move(q_.front());
-        q_.pop_front();
+        size_t pos;
+        Node* node;
+        for (;;) {
+            pos = head_.load(std::memory_order_acquire);
+            node = &buffer_[pos & mask_];
+            size_t seq = node->seq.load(std::memory_order_acquire);
+            intptr_t dif = (intptr_t)seq - (intptr_t)(pos + 1);
+            if (dif == 0) {
+                if (head_.compare_exchange_weak(pos, pos + 1, std::memory_order_acq_rel)) break;
+            } else if (dif < 0) {
+                return false; // 空
+            } else {
+                std::this_thread::yield();
+            }
+        }
+        out = std::move(node->value);
+        node->seq.store(pos + capacity_, std::memory_order_release);
+        avail_.fetch_sub(1, std::memory_order_release);
         return true;
     }
 
     bool wait_pop(T& out, std::chrono::milliseconds timeout) {
-        std::unique_lock<std::mutex> lk(m_);
-        if (!cv_.wait_for(lk, timeout, [&]{ return closed_ || !q_.empty(); })) return false;
-        if (q_.empty()) return false;
-        out = std::move(q_.front());
-        q_.pop_front();
-        return true;
+        if (try_pop(out)) return true;
+        std::unique_lock<std::mutex> lk(cv_mtx_);
+        if (!cv_.wait_for(lk, timeout, [&]{ return closed_.load(std::memory_order_acquire) || avail_.load(std::memory_order_acquire) > 0; })) return false;
+        if (closed_.load(std::memory_order_acquire) && avail_.load(std::memory_order_acquire) == 0) return false;
+        return try_pop(out);
     }
 
     void close() {
-        {
-            std::lock_guard<std::mutex> g(m_);
-            closed_ = true;
-        }
+        closed_.store(true, std::memory_order_release);
+        std::lock_guard<std::mutex> lk(cv_mtx_);
         cv_.notify_all();
     }
 
     bool empty() const {
-        std::lock_guard<std::mutex> g(m_);
-        return q_.empty();
+        return avail_.load(std::memory_order_acquire) == 0;
     }
 
     bool closed() const {
-        std::lock_guard<std::mutex> g(m_);
-        return closed_;
+        return closed_.load(std::memory_order_acquire);
     }
 
 private:
-    mutable std::mutex m_;
+    struct Node {
+        std::atomic<size_t> seq{};
+        T value{};
+        Node() = default;
+        ~Node() = default;
+    };
+
+    size_t capacity_{};
+    size_t mask_{};
+    Node* buffer_{nullptr};
+    std::atomic<size_t> head_{};
+    std::atomic<size_t> tail_{};
+    std::atomic<bool> closed_{};
+    std::atomic<size_t> avail_{};
     std::condition_variable cv_;
-    std::deque<T> q_;
-    bool closed_{false};
+    std::mutex cv_mtx_;
 };
 
 #ifdef HAS_LIBAIO

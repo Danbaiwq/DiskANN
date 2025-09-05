@@ -88,22 +88,19 @@ void AIOManager::event_loop(ThreadSafeQueue<std::shared_ptr<QueryContext>>& rera
         if (stop_.load(std::memory_order_relaxed)) {
             break;
         }
-        // 若没有在途请求，可以更快退出
         if (inflight_.load(std::memory_order_relaxed) == 0) {
-            continue; // 轻量轮询，等待 stop_ 被置位
+            // 无在途，阻塞片刻等事件或停止信号
+            struct io_event evs_empty[1];
+            struct timespec ts; ts.tv_sec = 0; ts.tv_nsec = 20000000; // 20ms
+            (void)::io_getevents(ctx_, 0, 1, evs_empty, &ts);
+            continue;
         }
         struct io_event evs[kBatch];
-        struct timespec ts; ts.tv_sec = 0; ts.tv_nsec = 10000000; // 10ms 轮询
-        // 等待至少 1 个事件，但不要无限阻塞：设置超时
+        // 正常运行阶段：阻塞等待至少 1 个事件（更省 CPU），停止时会 io_cancel 唤醒
         long want = kBatch;
-        long min_nr = stop_.load(std::memory_order_relaxed) ? 0 : 1;
-        long got = ::io_getevents(ctx_, min_nr, want, evs, &ts);
+        long min_nr = 1;
+        long got = ::io_getevents(ctx_, min_nr, want, evs, nullptr);
         if (got <= 0) {
-            if (stop_.load(std::memory_order_relaxed)) {
-                // 停止阶段：不再等待事件，直接退出
-                break;
-            }
-            // 运行阶段：超时重试
             continue;
         }
         for (long j = 0; j < got; ++j) {
@@ -470,18 +467,16 @@ static void shared_worker_loop(ThreadSafeQueue<std::shared_ptr<QueryContext>>& s
     while (true) {
         if (stop_flag.load(std::memory_order_relaxed) && stage1.empty() && stage2.empty() && stage3.empty()) break;
         std::shared_ptr<QueryContext> ctx;
-        if (stage3.wait_pop(ctx, 1ms)) {
-            execute_rerank(ctx, env);
-            continue;
+        // 短自旋优先级获取，降低 condvar 等待比例
+        for (int spin = 0; spin < 64; ++spin) {
+            if (stage3.try_pop(ctx)) { execute_rerank(ctx, env); goto next; }
+            if (stage2.try_pop(ctx)) { execute_io_prep(ctx, env); goto next; }
+            if (stage1.try_pop(ctx)) { execute_candidate_generation(ctx, stage2, env); goto next; }
         }
-        if (stage2.wait_pop(ctx, 1ms)) {
-            execute_io_prep(ctx, env);
-            continue;
-        }
-        if (stage1.wait_pop(ctx, 1ms)) {
-            execute_candidate_generation(ctx, stage2, env);
-            continue;
-        }
+        if (stage3.wait_pop(ctx, 2ms)) { execute_rerank(ctx, env); goto next; }
+        if (stage2.wait_pop(ctx, 2ms)) { execute_io_prep(ctx, env); goto next; }
+        if (stage1.wait_pop(ctx, 2ms)) { execute_candidate_generation(ctx, stage2, env); goto next; }
+        next: ;
     }
 }
 
@@ -500,9 +495,10 @@ void run_pipeline_search(
     ThreadSafeQueue<std::shared_ptr<QueryContext>>*& out_stage2,
     ThreadSafeQueue<std::shared_ptr<QueryContext>>*& out_stage3
 ) {
-    auto* stage1 = new ThreadSafeQueue<std::shared_ptr<QueryContext>>();
-    auto* stage2 = new ThreadSafeQueue<std::shared_ptr<QueryContext>>();
-    auto* stage3 = new ThreadSafeQueue<std::shared_ptr<QueryContext>>();
+    size_t qcap = getenv_size_t_or("PIPELINE_QUEUE_CAP", 8192);
+    auto* stage1 = new ThreadSafeQueue<std::shared_ptr<QueryContext>>(qcap);
+    auto* stage2 = new ThreadSafeQueue<std::shared_ptr<QueryContext>>(qcap);
+    auto* stage3 = new ThreadSafeQueue<std::shared_ptr<QueryContext>>(qcap);
 
     out_stage1 = stage1; out_stage2 = stage2; out_stage3 = stage3;
 
