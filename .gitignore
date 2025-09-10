@@ -378,3 +378,10 @@ gperftools
 
 # Rust
 rust/target
+
+# ignore core dump
+core.*
+*.core
+core.[0-9]*
+perf/core.*
+dumps/core*
