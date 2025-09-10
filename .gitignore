@@ -385,3 +385,7 @@ core.*
 core.[0-9]*
 perf/core.*
 dumps/core*
+
+# other
+perf/
+demo/scripts/
