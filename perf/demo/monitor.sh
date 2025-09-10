@@ -14,7 +14,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DEMO_BIN="${DEMO_BIN:-$REPO_ROOT/build/demo/demo_test}"
 
 # 索引产物所在目录（构建脚本写入的位置）
-INDEX_DIR="${INDEX_DIR:-/data/1/demo}"
+INDEX_DIR="${INDEX_DIR:-/data/1/demo/gist}"
 
 # 查询数据与评测 GT 路径（请设置为实际文件）
 QUERY_FBIN="${QUERY_FBIN:-/data/dataset/gist/gist_query.fbin}"            # 例：/data/sift_query.fbin
@@ -31,7 +31,7 @@ RERANK_USE_MMAP="${RERANK_USE_MMAP:-0}"
 
 # 新增：查询参数 F 与 K
 DEMO_F_PARAM="${DEMO_F_PARAM:-4}"
-DEMO_K_PARAM="${DEMO_K_PARAM:-100}"
+DEMO_K_PARAM="${DEMO_K_PARAM:-200}"
 
 # 新增：BQ 缓存内存预算（MB）
 BQ_BUCKET_CACHE_MB="${BQ_BUCKET_CACHE_MB:-400}"
@@ -53,7 +53,7 @@ RERANK_BATCH_MB="${RERANK_BATCH_MB:-32}"          # 每段最大读取字节数�
 RERANK_GAP_GIDS="${RERANK_GAP_GIDS:-16}"          # 合并段允许的 gid 间隙（行数）
 
 # 新增：并行与异步 I/O 参数（任务 4 & 任务 5）
-RERANK_O_DIRECT="${RERANK_O_DIRECT:-1}"
+RERANK_O_DIRECT="${RERANK_O_DIRECT:-0}"
 RERANK_STREAMING="${RERANK_STREAMING:-1}"
 RERANK_IO_THREADS="${RERANK_IO_THREADS:-0}"       # >1 启用线程池并行 pread（如 4/8）和libaio的线程池
 RERANK_IO_URING="${RERANK_IO_URING:-0}"           # 1 启用 io_uring 异步 I/O（需 liburing）
