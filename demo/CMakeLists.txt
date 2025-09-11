@@ -11,22 +11,28 @@ find_package(OpenMP REQUIRED)
 # Define the executable target first
 add_executable(demo_test src/main.cpp src/utils.cpp src/kmeans.cpp src/vamana_graph.cpp src/search.cpp src/build.cpp src/pipeline.cpp)
 
+# NEW: streaming kmeans executable
+add_executable(stream_kmeans src/stream_kmeans.cpp)
+
 # --- Sanity check: Print the include path that will be used ---
 message(STATUS "[Demo] Calculated include path: ${CMAKE_CURRENT_SOURCE_DIR}/../include")
 
 # Now, apply properties to the defined target
 # Add the main project's include directory to our search path
 target_include_directories(demo_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include)
+target_include_directories(stream_kmeans PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include)
 
 # Link against the main diskann library
 # Assumes diskann library has been built.
 target_link_libraries(demo_test PRIVATE Threads::Threads OpenMP::OpenMP_CXX diskann)
+target_link_libraries(stream_kmeans PRIVATE Threads::Threads OpenMP::OpenMP_CXX diskann)
 
 # rabitq headers
 include_directories(/home/danbai.wq/DiskANN/rabitq/rabitqlib)
 
 # Add compiler flags for AVX2 and FMA support for performance
 target_compile_options(demo_test PRIVATE -mavx2 -mfma)
+target_compile_options(stream_kmeans PRIVATE -mavx2 -mfma)
 
 # Optional: liburing (for io_uring async I/O)
 find_path(URING_INCLUDE_DIR liburing.h PATHS /usr/include /usr/local/include)

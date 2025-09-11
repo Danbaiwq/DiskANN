@@ -12,6 +12,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DEMO_BIN="${DEMO_BIN:-$REPO_ROOT/build/demo/demo_test}"
+STREAM_KMEANS_BIN="${STREAM_KMEANS_BIN:-$REPO_ROOT/build/demo/stream_kmeans}"
 
 # 构建产物输出目录
 OUTPUT_DIR="${OUTPUT_DIR:-/data/1/demo/gist}"
@@ -29,6 +30,16 @@ BQ_SATURATE_PASS="${BQ_SATURATE_PASS:-1}"        # 轻量互连/饱和微修复�
 # 可选值：bq (使用BQ向量构图), sq (使用SQ向量构图), no_quantization (使用全精度向量构图)
 # 注意：无论使用哪种模式，最终保存的图都是 BQ 压缩格式
 CONSTRUCT_QUANTIZATION="${CONSTRUCT_QUANTIZATION:-no_quantization}"
+
+# 新增：KMeans 模式切换（dist：使用 DistKMeans；stream：使用分块流式 KMeans）
+KMEANS_MODE="${KMEANS_MODE:-stream}"
+# 当 KMEANS_MODE=stream 时的参数
+CHUNK_DIR="${CHUNK_DIR:-/data/dataset/deep/chunk}"              # 例如：/data/dataset/deep/chunk
+KMEANS_K="${KMEANS_K:-1024}"
+KMEANS_EPOCHS="${KMEANS_EPOCHS:-20}"
+KMEANS_BATCH_GIB="${KMEANS_BATCH_GIB:-20.0}"          # 每批最大GiB
+KMEANS_INIT_SAMPLE_GIB="${KMEANS_INIT_SAMPLE_GIB:-10.0}"  # KMeans++ reservoir 采样GiB
+CENTROIDS_OUT="${CENTROIDS_OUT:-$OUTPUT_DIR/centroids.fbin}"
 # =====================================
 
 # 基本校验
@@ -53,7 +64,29 @@ cat <<EOF
 [demo build] BQ_GRAPH_THRESHOLD   : $BQ_GRAPH_THRESHOLD
 [demo build] BQ_SATURATE_PASS     : $BQ_SATURATE_PASS
 [demo build] CONSTRUCT_QUANTIZATION: $CONSTRUCT_QUANTIZATION
+[demo build] KMEANS_MODE          : $KMEANS_MODE
 EOF
+
+# 若选择流式 KMeans，先产出质心
+if [[ "$KMEANS_MODE" == "stream" ]]; then
+  if [[ ! -x "$STREAM_KMEANS_BIN" ]]; then
+    echo "[error] STREAM_KMEANS_BIN 不存在或不可执行: $STREAM_KMEANS_BIN" >&2
+    exit 1
+  fi
+  if [[ -z "$CHUNK_DIR" ]]; then
+    echo "[error] KMEANS_MODE=stream 需要设置 CHUNK_DIR 指向 .part_*.fbin 所在目录" >&2
+    exit 1
+  fi
+  echo "[demo build] run stream_kmeans to compute centroids" >&2
+  "$STREAM_KMEANS_BIN" \
+    --chunk_dir "$CHUNK_DIR" \
+    --k "$KMEANS_K" \
+    --epochs "$KMEANS_EPOCHS" \
+    --batch_gib "$KMEANS_BATCH_GIB" \
+    --init_sample_gib "$KMEANS_INIT_SAMPLE_GIB" \
+    --out "$CENTROIDS_OUT"
+  echo "[demo build] centroids written: $CENTROIDS_OUT" >&2
+fi
 
 # 运行构建
 DEMO_OUTPUT_DIR="$OUTPUT_DIR" \

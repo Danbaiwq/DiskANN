@@ -147,15 +147,41 @@ void build_mode(const std::string& data_path) {
         }
     }
 
-    // --- 分布式多轮 mini-batch KMeans ---
-    std::cout << "Starting Distributed Mini-batch KMeans (W=t=" << t << ", k=" << m << ")..." << std::endl;
-    DataSet final_centroids = distributed_minibatch_kmeans(
-        full_dataset_flat, num_points, dim,
-        m, /*workers=*/t,
-        alpha,
-        /*max_iter=*/200,
-        /*tol=*/1e-4f,
-        /*patience=*/3);
+    // --- 分布式多轮 mini-batch KMeans 或外部质心加载 ---
+    DataSet final_centroids;
+    {
+        std::string external_centroids = get_env_str("EXTERNAL_CENTROIDS_FBIN");
+        if (!external_centroids.empty()) {
+            size_t c_n = 0, c_dim = 0;
+            FlatDataSet centroids_flat = load_fbin_flat(external_centroids, c_n, c_dim);
+            if (centroids_flat.empty()) {
+                std::cerr << "FATAL: failed to load external centroids from " << external_centroids << std::endl;
+                return;
+            }
+            if (c_dim != dim) {
+                std::cerr << "FATAL: centroids dim(" << c_dim << ") != data dim(" << dim << ")" << std::endl;
+                return;
+            }
+            if (c_n != m) {
+                std::cerr << "FATAL: centroids count(" << c_n << ") != expected m(" << m << ")" << std::endl;
+                return;
+            }
+            final_centroids.resize(m, DataPoint(dim, 0.0f));
+            for (size_t i = 0; i < m; ++i) {
+                std::copy(centroids_flat.data() + i * dim, centroids_flat.data() + (i + 1) * dim, final_centroids[i].begin());
+            }
+            std::cout << "Loaded external centroids from " << external_centroids << std::endl;
+        } else {
+            std::cout << "Starting Distributed Mini-batch KMeans (W=t=" << t << ", k=" << m << ")..." << std::endl;
+            final_centroids = distributed_minibatch_kmeans(
+                full_dataset_flat, num_points, dim,
+                m, /*workers=*/t,
+                alpha,
+                /*max_iter=*/200,
+                /*tol=*/1e-4f,
+                /*patience=*/3);
+        }
+    }
     
     // --- 均衡后的分桶策略（容量约束 + 次近回退） ---
     std::cout << "Starting balanced vector bucketing with capacity constraint..." << std::endl;
