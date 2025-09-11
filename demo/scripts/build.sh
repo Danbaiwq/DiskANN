@@ -15,10 +15,10 @@ DEMO_BIN="${DEMO_BIN:-$REPO_ROOT/build/demo/demo_test}"
 STREAM_KMEANS_BIN="${STREAM_KMEANS_BIN:-$REPO_ROOT/build/demo/stream_kmeans}"
 
 # 构建产物输出目录
-OUTPUT_DIR="${OUTPUT_DIR:-/data/1/demo/gist}"
+OUTPUT_DIR="${OUTPUT_DIR:-/data/1/demo/deep}"
 
 # 基础数据（base.fbin）路径（请设置为实际文件）
-BASE_FBIN="${BASE_FBIN:-/data/dataset/gist/gist_base.fbin}"    # 例：/data/sift_base.fbin
+BASE_FBIN="${BASE_FBIN:-/share/dataset/deep1B.fbin}"    # 例：/data/sift_base.fbin
 
 # 构建参数（可按需调整）
 USE_BQ="${USE_BQ:-1}"                 # 1 启用 BQ 模式；0 构 raw 的 bucket_vamana.index
@@ -36,10 +36,14 @@ KMEANS_MODE="${KMEANS_MODE:-stream}"
 # 当 KMEANS_MODE=stream 时的参数
 CHUNK_DIR="${CHUNK_DIR:-/data/dataset/deep/chunk}"              # 例如：/data/dataset/deep/chunk
 KMEANS_K="${KMEANS_K:-1024}"
-KMEANS_EPOCHS="${KMEANS_EPOCHS:-20}"
-KMEANS_BATCH_GIB="${KMEANS_BATCH_GIB:-20.0}"          # 每批最大GiB
-KMEANS_INIT_SAMPLE_GIB="${KMEANS_INIT_SAMPLE_GIB:-10.0}"  # KMeans++ reservoir 采样GiB
-CENTROIDS_OUT="${CENTROIDS_OUT:-$OUTPUT_DIR/centroids.fbin}"
+KMEANS_EPOCHS="${KMEANS_EPOCHS:-5}"
+KMEANS_BATCH_GIB="${KMEANS_BATCH_GIB:-4.0}"          # 每批最大GiB
+KMEANS_INIT_SAMPLE_GIB="${KMEANS_INIT_SAMPLE_GIB:-2.0}"  # KMeans++ reservoir 采样GiB
+CENTROIDS_OUT="${CENTROIDS_OUT:-/data/1/demo/gist/centroids.fbin}"
+# 并行构桶个数（可选，默认=CPU核数）
+BUCKET_BUILD_PARALLELISM="${BUCKET_BUILD_PARALLELISM:-}"
+# 新增：构建阶段总内存上限（GiB），用于流式分桶批量大小和并行度控制
+CONSTRUCT_MAX_GB="${CONSTRUCT_MAX_GB:-50}"
 # =====================================
 
 # 基本校验
@@ -65,6 +69,8 @@ cat <<EOF
 [demo build] BQ_SATURATE_PASS     : $BQ_SATURATE_PASS
 [demo build] CONSTRUCT_QUANTIZATION: $CONSTRUCT_QUANTIZATION
 [demo build] KMEANS_MODE          : $KMEANS_MODE
+[demo build] BUCKET_BUILD_PARALLELISM: ${BUCKET_BUILD_PARALLELISM:-auto}
+[demo build] CONSTRUCT_MAX_GB     : ${CONSTRUCT_MAX_GB:-unset}
 EOF
 
 # 若选择流式 KMeans，先产出质心
@@ -77,15 +83,26 @@ if [[ "$KMEANS_MODE" == "stream" ]]; then
     echo "[error] KMEANS_MODE=stream 需要设置 CHUNK_DIR 指向 .part_*.fbin 所在目录" >&2
     exit 1
   fi
-  echo "[demo build] run stream_kmeans to compute centroids" >&2
-  "$STREAM_KMEANS_BIN" \
-    --chunk_dir "$CHUNK_DIR" \
-    --k "$KMEANS_K" \
-    --epochs "$KMEANS_EPOCHS" \
-    --batch_gib "$KMEANS_BATCH_GIB" \
-    --init_sample_gib "$KMEANS_INIT_SAMPLE_GIB" \
-    --out "$CENTROIDS_OUT"
-  echo "[demo build] centroids written: $CENTROIDS_OUT" >&2
+  # 优先使用已存在的质心文件
+  if [[ -n "${EXTERNAL_CENTROIDS_FBIN:-}" && -f "$EXTERNAL_CENTROIDS_FBIN" ]]; then
+    echo "[demo build] reuse external centroids: $EXTERNAL_CENTROIDS_FBIN" >&2
+  elif [[ -f "$CENTROIDS_OUT" ]]; then
+    echo "[demo build] reuse existing centroids: $CENTROIDS_OUT" >&2
+    export EXTERNAL_CENTROIDS_FBIN="$CENTROIDS_OUT"
+  else
+    echo "[demo build] run stream_kmeans to compute centroids" >&2
+    echo "[stream_kmeans] k=$KMEANS_K epochs=$KMEANS_EPOCHS batch_gib=$KMEANS_BATCH_GIB init_sample_gib=$KMEANS_INIT_SAMPLE_GIB" >&2
+    "$STREAM_KMEANS_BIN" \
+      --chunk_dir "$CHUNK_DIR" \
+      --k "$KMEANS_K" \
+      --epochs "$KMEANS_EPOCHS" \
+      --batch_gib "$KMEANS_BATCH_GIB" \
+      --init_sample_gib "$KMEANS_INIT_SAMPLE_GIB" \
+      --out "$CENTROIDS_OUT"
+    echo "[demo build] centroids written: $CENTROIDS_OUT" >&2
+    # 将 centroids 交给后续 demo 使用，避免重复聚类
+    export EXTERNAL_CENTROIDS_FBIN="$CENTROIDS_OUT"
+  fi
 fi
 
 # 运行构建
@@ -95,6 +112,10 @@ BQ_BITS="$BQ_BITS" \
 BQ_GRAPH_THRESHOLD="$BQ_GRAPH_THRESHOLD" \
 BQ_SATURATE_PASS="$BQ_SATURATE_PASS" \
 CONSTRUCT_QUANTIZATION="$CONSTRUCT_QUANTIZATION" \
+BUCKET_BUILD_PARALLELISM="${BUCKET_BUILD_PARALLELISM}" \
+KMEANS_MODE="$KMEANS_MODE" \
+CHUNK_DIR="$CHUNK_DIR" \
+CONSTRUCT_MAX_GB="${CONSTRUCT_MAX_GB}" \
 "$DEMO_BIN" "$BASE_FBIN"
 
 echo "[demo build] artifacts written to: $OUTPUT_DIR" 

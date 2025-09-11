@@ -94,8 +94,11 @@ static void reservoir_sample(const std::vector<PartInfo>& parts, uint32_t dim, u
     for (const auto& part : parts) {
         std::ifstream in(part.filepath, std::ios::binary);
         if (!in) throw std::runtime_error("Failed to open part: " + part.filepath);
-        uint32_t n = 0, d = 0; in.read(reinterpret_cast<char*>(&n), 4); in.read(reinterpret_cast<char*>(&d), 4);
+        uint32_t n = 0, d = 0; 
+        in.read(reinterpret_cast<char*>(&n), 4); 
+        in.read(reinterpret_cast<char*>(&d), 4);
         if (d != dim) throw std::runtime_error("Dimension mismatch in part: " + part.filepath);
+        // read the data into a buffer, IO block size is 256MiB
         std::vector<float> buf(std::min<uint64_t>(n, max_vecs_per_block) * dim);
         uint64_t remaining = n;
         while (remaining > 0) {

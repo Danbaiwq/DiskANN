@@ -62,6 +62,66 @@ static inline int get_env_int(const char* key, int default_val) {
     }
 }
 
+// --- Streaming chunk helpers (for KMEANS_MODE=stream) ---
+struct StreamChunkPart {
+    std::string path;
+    uint64_t n;            // vectors in this part
+    uint64_t start_gid;    // global id start
+};
+
+static bool scan_chunk_dir(const std::string& chunk_dir, size_t& dim_out, uint64_t& total_points_out, std::vector<StreamChunkPart>& parts_out) {
+    namespace fs = std::filesystem;
+    parts_out.clear();
+    dim_out = 0;
+    total_points_out = 0;
+    std::error_code ec;
+    if (!fs::exists(chunk_dir, ec)) return false;
+    for (auto const& entry : fs::directory_iterator(chunk_dir)) {
+        if (!entry.is_regular_file()) continue;
+        if (entry.path().extension() != ".fbin") continue;
+        std::ifstream in(entry.path(), std::ios::binary);
+        if (!in.is_open()) continue;
+        uint32_t n = 0, d = 0;
+        in.read(reinterpret_cast<char*>(&n), sizeof(uint32_t));
+        in.read(reinterpret_cast<char*>(&d), sizeof(uint32_t));
+        in.close();
+        if (dim_out == 0) dim_out = static_cast<size_t>(d);
+        if (static_cast<size_t>(d) != dim_out) return false;
+        parts_out.push_back(StreamChunkPart{ entry.path().string(), static_cast<uint64_t>(n), 0 });
+    }
+    std::sort(parts_out.begin(), parts_out.end(), [](const StreamChunkPart& a, const StreamChunkPart& b){ return a.path < b.path; });
+    uint64_t prefix = 0;
+    for (auto& p : parts_out) {
+        p.start_gid = prefix;
+        prefix += p.n;
+    }
+    total_points_out = prefix;
+    return !parts_out.empty();
+}
+
+static bool read_vector_from_chunks(const std::vector<StreamChunkPart>& parts, size_t dim, uint64_t gid, DataPoint& out_point) {
+    // locate part by gid
+    size_t lo = 0, hi = parts.size();
+    while (lo + 1 < hi) {
+        size_t mid = (lo + hi) / 2;
+        if (parts[mid].start_gid <= gid) lo = mid; else hi = mid;
+    }
+    const auto& part = parts[lo];
+    uint64_t local = gid - part.start_gid;
+    if (local >= part.n) return false;
+    std::ifstream in(part.path, std::ios::binary);
+    if (!in.is_open()) return false;
+    const uint64_t header = sizeof(uint32_t) * 2ull;
+    const uint64_t vec_bytes = static_cast<uint64_t>(dim) * sizeof(float);
+    const uint64_t offset = header + local * vec_bytes;
+    in.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
+    out_point.assign(dim, 0.0f);
+    in.read(reinterpret_cast<char*>(out_point.data()), static_cast<std::streamsize>(vec_bytes));
+    bool ok = static_cast<uint64_t>(in.gcount()) == vec_bytes;
+    in.close();
+    return ok;
+}
+
 void build_mode(const std::string& data_path) {
     std::cout << "\n--- Running in BUILD mode ---" << std::endl;
 
@@ -123,11 +183,36 @@ void build_mode(const std::string& data_path) {
 
     auto build_start_time = std::chrono::high_resolution_clock::now();
     // --- Load Data ---
-    std::cout << "Loading data from " << data_path << "..." << std::endl;
-    size_t num_points, dim;
-    FlatDataSet full_dataset_flat = load_fbin_flat(data_path, num_points, dim);
-    if (full_dataset_flat.empty()) {
-        return;
+    std::cout << "Initializing build inputs..." << std::endl;
+    size_t num_points = 0, dim = 0;
+
+    // 决定是否使用分块流式数据
+    std::string kmeans_mode = get_env_str("KMEANS_MODE");
+    bool use_stream_chunks = (kmeans_mode == "stream");
+    std::vector<StreamChunkPart> chunk_parts;
+
+    FlatDataSet full_dataset_flat;
+    if (use_stream_chunks) {
+        std::string chunk_dir = get_env_str("CHUNK_DIR");
+        if (chunk_dir.empty()) {
+            std::cerr << "FATAL: KMEANS_MODE=stream requires CHUNK_DIR." << std::endl;
+            return;
+        }
+        uint64_t total_pts64 = 0;
+        size_t scan_dim = 0;
+        if (!scan_chunk_dir(chunk_dir, scan_dim, total_pts64, chunk_parts)) {
+            std::cerr << "FATAL: Failed to scan CHUNK_DIR or inconsistent dims." << std::endl;
+            return;
+        }
+        dim = scan_dim;
+        num_points = static_cast<size_t>(total_pts64);
+        std::cout << "[stream bucketing] from CHUNK_DIR: dim=" << dim << ", total_points=" << num_points << std::endl;
+    } else {
+        FlatDataSet tmp = load_fbin_flat(data_path, num_points, dim);
+        if (tmp.empty()) {
+            return;
+        }
+        full_dataset_flat.swap(tmp);
     }
 
     // 生成 vector_offsets.bin（uint64_t 数组），记录每个向量在原始 .fbin 文件中的字节偏移
@@ -136,9 +221,21 @@ void build_mode(const std::string& data_path) {
         if (off_writer.is_open()) {
             const uint64_t header_bytes = sizeof(uint32_t) * 2;
             const uint64_t vec_bytes = static_cast<uint64_t>(sizeof(float)) * static_cast<uint64_t>(dim);
-            for (uint64_t gid = 0; gid < static_cast<uint64_t>(num_points); ++gid) {
-                uint64_t off = header_bytes + gid * vec_bytes;
-                off_writer.write(reinterpret_cast<const char*>(&off), sizeof(uint64_t));
+            if (!use_stream_chunks) {
+                for (uint64_t gid = 0; gid < static_cast<uint64_t>(num_points); ++gid) {
+                    uint64_t off = header_bytes + gid * vec_bytes;
+                    off_writer.write(reinterpret_cast<const char*>(&off), sizeof(uint64_t));
+                }
+            } else {
+                // stream 模式：按 chunk 顺序逐段写偏移（仍按原始全量序布局）
+                uint64_t base = header_bytes;
+                for (const auto& p : chunk_parts) {
+                    for (uint64_t i = 0; i < p.n; ++i) {
+                        uint64_t off = base + i * vec_bytes;
+                        off_writer.write(reinterpret_cast<const char*>(&off), sizeof(uint64_t));
+                    }
+                    base += p.n * vec_bytes;
+                }
             }
             off_writer.close();
             std::cout << "vector_offsets.bin written (" << num_points << " offsets)." << std::endl;
@@ -193,73 +290,172 @@ void build_mode(const std::string& data_path) {
     const size_t per_cluster_cap = (static_cast<size_t>(l) * num_points) / m;
     std::vector<size_t> cluster_load(m, 0);
 
-    // 先按样本到最近质心的距离排序
-    std::vector<std::pair<float, uint32_t>> point_order(num_points);
-    #pragma omp parallel for
-    for (size_t i = 0; i < num_points; ++i) {
-        DataPoint point = get_point_copy(full_dataset_flat, i, dim);
-        float best = std::numeric_limits<float>::max();
-        for (uint32_t j = 0; j < m; ++j) {
-            float d = calculate_distance(point, final_centroids[j]);
-            if (d < best) best = d;
+    if (!use_stream_chunks) {
+        // 原内存路径：先按样本到最近质心的距离排序，再分配
+        std::vector<std::pair<float, uint32_t>> point_order(num_points);
+        #pragma omp parallel for
+        for (size_t i = 0; i < num_points; ++i) {
+            DataPoint point = get_point_copy(full_dataset_flat, i, dim);
+            float best = std::numeric_limits<float>::max();
+            for (uint32_t j = 0; j < m; ++j) {
+                float d = calculate_distance(point, final_centroids[j]);
+                if (d < best) best = d;
+            }
+            point_order[i] = {best, static_cast<uint32_t>(i)};
         }
-        point_order[i] = {best, static_cast<uint32_t>(i)};
-    }
-    std::sort(point_order.begin(), point_order.end());
+        std::sort(point_order.begin(), point_order.end());
 
-    // 并行分配：原子计数 + 线程本地缓冲合并，保持按距离排序的处理顺序
-    std::vector<std::atomic<size_t>> cluster_load_atomic(m);
-    for (size_t c = 0; c < m; ++c) cluster_load_atomic[c].store(cluster_load[c], std::memory_order_relaxed);
+        std::vector<std::atomic<size_t>> cluster_load_atomic(m);
+        for (size_t c = 0; c < m; ++c) cluster_load_atomic[c].store(cluster_load[c], std::memory_order_relaxed);
 
-    const size_t num_threads = std::max(1, omp_get_max_threads());
-    std::vector<Buckets> thread_local_buckets(num_threads, Buckets(m));
-    std::vector<size_t> thread_local_counts(num_threads, 0);
+        const size_t num_threads = std::max(1, omp_get_max_threads());
+        std::vector<Buckets> thread_local_buckets(num_threads, Buckets(m));
+        std::vector<size_t> thread_local_counts(num_threads, 0);
 
-    #pragma omp parallel for schedule(dynamic, 256)
-    for (size_t ord = 0; ord < point_order.size(); ++ord) {
-        int tid = omp_get_thread_num();
-        uint32_t i = point_order[ord].second;
-        DataPoint point = get_point_copy(full_dataset_flat, i, dim);
-        std::vector<std::pair<float, uint32_t>> dists;
-        dists.reserve(m);
-        for (uint32_t j = 0; j < m; ++j) {
-            dists.push_back({calculate_distance(point, final_centroids[j]), j});
-        }
-        std::sort(dists.begin(), dists.end());
+        #pragma omp parallel for schedule(dynamic, 256)
+        for (size_t ord = 0; ord < point_order.size(); ++ord) {
+            int tid = omp_get_thread_num();
+            uint32_t i = point_order[ord].second;
+            DataPoint point = get_point_copy(full_dataset_flat, i, dim);
+            std::vector<std::pair<float, uint32_t>> dists;
+            dists.reserve(m);
+            for (uint32_t j = 0; j < m; ++j) {
+                dists.push_back({calculate_distance(point, final_centroids[j]), j});
+            }
+            std::sort(dists.begin(), dists.end());
 
-        size_t assigned = 0;
-        float dist1 = dists[0].first;
-        for (size_t idx = 0; idx < dists.size() && assigned < static_cast<size_t>(l); ++idx) {
-            uint32_t cid = dists[idx].second;
-            float dist_k = dists[idx].first;
-            if (!(idx == 0 || (beta * dist1 >= dist_k))) continue;
-            size_t cur = cluster_load_atomic[cid].load(std::memory_order_relaxed);
-            while (cur < per_cluster_cap) {
-                if (cluster_load_atomic[cid].compare_exchange_weak(cur, cur + 1, std::memory_order_acq_rel)) {
-                    thread_local_buckets[tid][cid].push_back(i);
-                    thread_local_counts[tid] += 1;
-                    assigned += 1;
-                    break;
+            size_t assigned = 0;
+            float dist1 = dists[0].first;
+            for (size_t idx = 0; idx < dists.size() && assigned < static_cast<size_t>(l); ++idx) {
+                uint32_t cid = dists[idx].second;
+                float dist_k = dists[idx].first;
+                if (!(idx == 0 || (beta * dist1 >= dist_k))) continue;
+                size_t cur = cluster_load_atomic[cid].load(std::memory_order_relaxed);
+                while (cur < per_cluster_cap) {
+                    if (cluster_load_atomic[cid].compare_exchange_weak(cur, cur + 1, std::memory_order_acq_rel)) {
+                        thread_local_buckets[tid][cid].push_back(i);
+                        thread_local_counts[tid] += 1;
+                        assigned += 1;
+                        break;
+                    }
                 }
             }
         }
-    }
 
-    // 合并线程本地结果
-    for (int tid = 0; tid < static_cast<int>(num_threads); ++tid) {
-        for (size_t cid = 0; cid < m; ++cid) {
-            if (!thread_local_buckets[tid][cid].empty()) {
-                auto& dst = buckets[cid];
-                auto& src = thread_local_buckets[tid][cid];
-                dst.insert(dst.end(), src.begin(), src.end());
+        // 合并线程本地结果
+        for (int tid = 0; tid < static_cast<int>(num_threads); ++tid) {
+            for (size_t cid = 0; cid < m; ++cid) {
+                if (!thread_local_buckets[tid][cid].empty()) {
+                    auto& dst = buckets[cid];
+                    auto& src = thread_local_buckets[tid][cid];
+                    dst.insert(dst.end(), src.begin(), src.end());
+                }
             }
+            total_bucket_assignments += thread_local_counts[tid];
         }
-        total_bucket_assignments += thread_local_counts[tid];
-    }
 
-    // 同步 cluster_load 为最终值
-    for (size_t cid = 0; cid < m; ++cid) {
-        cluster_load[cid] = cluster_load_atomic[cid].load(std::memory_order_relaxed);
+        for (size_t cid = 0; cid < m; ++cid) {
+            cluster_load[cid] = buckets[cid].size();
+        }
+    } else {
+        // 流式路径：逐 part / block 处理，块内并行；按 CONSTRUCT_MAX_GB 动态确定批大小
+        double mem_cap_gb = 0.0;
+        if (const char* env_mem = std::getenv("CONSTRUCT_MAX_GB")) {
+            try { mem_cap_gb = std::stod(env_mem); } catch (...) { mem_cap_gb = 0.0; }
+        }
+        const uint64_t vec_bytes = static_cast<uint64_t>(dim) * sizeof(float);
+        // 预留 2 倍空间（输入+线程本地缓冲开销），每批最多载入的向量数：
+        uint64_t batch_vec_cap = 0;
+        if (mem_cap_gb > 0.0) {
+            long double bytes = static_cast<long double>(mem_cap_gb) * (1ull<<30);
+            uint64_t cap = static_cast<uint64_t>(bytes / (2.0L * vec_bytes));
+            batch_vec_cap = std::max<uint64_t>(1, cap);
+        }
+        const uint64_t fallback_block_vecs = std::max<uint64_t>(1, (256ull << 20) / vec_bytes); // 256MiB
+
+        for (const auto& part : chunk_parts) {
+            std::ifstream in(part.path, std::ios::binary);
+            if (!in.is_open()) { std::cerr << "Failed to open part: " << part.path << std::endl; return; }
+            uint32_t n = 0, d = 0; in.read(reinterpret_cast<char*>(&n), 4); in.read(reinterpret_cast<char*>(&d), 4);
+            if (static_cast<size_t>(d) != dim) { std::cerr << "Dim mismatch in part: " << part.path << std::endl; return; }
+            std::cout << "[stream bucketing] part begin: path=" << part.path << ", n=" << n << ", start_gid=" << part.start_gid << std::endl;
+            uint64_t remaining = n;
+            uint64_t local_index = 0;
+            size_t block_idx = 0;
+            while (remaining > 0) {
+                uint64_t block_vecs = batch_vec_cap > 0 ? std::min<uint64_t>(remaining, batch_vec_cap)
+                                                        : std::min<uint64_t>(remaining, fallback_block_vecs);
+                std::vector<float> buf;
+                buf.resize(block_vecs * dim);
+                const uint64_t bytes = block_vecs * vec_bytes;
+                in.read(reinterpret_cast<char*>(buf.data()), static_cast<std::streamsize>(bytes));
+                if (static_cast<uint64_t>(in.gcount()) != bytes) { std::cerr << "Short read in part: " << part.path << std::endl; return; }
+
+                // 进度：全局与分块
+                double global_done = 100.0 * static_cast<double>(part.start_gid + local_index) / static_cast<double>(num_points);
+                std::cout << "[stream bucketing] part_block " << block_idx << ": vecs=" << block_vecs
+                          << ", global=" << std::fixed << std::setprecision(2) << global_done << "%" << std::endl;
+
+                // 块内并行：thread-local buckets + 原子限容量
+                const size_t num_threads = std::max(1, omp_get_max_threads());
+                std::vector<Buckets> thread_local_buckets(num_threads, Buckets(m));
+                std::vector<size_t> thread_local_counts(num_threads, 0);
+
+                // 原子 cluster_load 视为全局容量表
+                std::vector<std::atomic<size_t>> cluster_load_atomic(m);
+                for (size_t c = 0; c < m; ++c) cluster_load_atomic[c].store(cluster_load[c], std::memory_order_relaxed);
+
+                #pragma omp parallel for schedule(static)
+                for (int64_t i = 0; i < static_cast<int64_t>(block_vecs); ++i) {
+                    int tid = omp_get_thread_num();
+                    DataPoint point(dim);
+                    std::copy(buf.data() + static_cast<size_t>(i)*dim, buf.data() + static_cast<size_t>(i+1)*dim, point.begin());
+                    std::vector<std::pair<float, uint32_t>> dists;
+                    dists.reserve(m);
+                    for (uint32_t j = 0; j < m; ++j) {
+                        dists.push_back({calculate_distance(point, final_centroids[j]), j});
+                    }
+                    std::sort(dists.begin(), dists.end());
+                    size_t assigned = 0;
+                    float dist1 = dists[0].first;
+                    uint64_t gid = part.start_gid + local_index + static_cast<uint64_t>(i);
+                    for (size_t idx = 0; idx < dists.size() && assigned < static_cast<size_t>(l); ++idx) {
+                        uint32_t cid = dists[idx].second;
+                        float dist_k = dists[idx].first;
+                        if (!(idx == 0 || (beta * dist1 >= dist_k))) continue;
+                        size_t cur = cluster_load_atomic[cid].load(std::memory_order_relaxed);
+                        while (cur < per_cluster_cap) {
+                            if (cluster_load_atomic[cid].compare_exchange_weak(cur, cur + 1, std::memory_order_acq_rel)) {
+                                thread_local_buckets[tid][cid].push_back(static_cast<uint32_t>(gid));
+                                thread_local_counts[tid] += 1;
+                                assigned += 1;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // 合并线程本地结果
+                for (int tid = 0; tid < static_cast<int>(num_threads); ++tid) {
+                    for (size_t cid = 0; cid < m; ++cid) {
+                        if (!thread_local_buckets[tid][cid].empty()) {
+                            auto& dst = buckets[cid];
+                            auto& src = thread_local_buckets[tid][cid];
+                            dst.insert(dst.end(), src.begin(), src.end());
+                        }
+                    }
+                    total_bucket_assignments += thread_local_counts[tid];
+                }
+                // 同步 cluster_load 为本批次后的值
+                for (size_t cid = 0; cid < m; ++cid) cluster_load[cid] = cluster_load_atomic[cid].load(std::memory_order_relaxed);
+
+                local_index += block_vecs;
+                remaining -= block_vecs;
+                ++block_idx;
+            }
+            in.close();
+            std::cout << "[stream bucketing] part end: path=" << part.path << ", total_assigned=" << total_bucket_assignments << std::endl;
+        }
     }
 
     double average_buckets_per_vector = total_bucket_assignments ? (static_cast<double>(total_bucket_assignments) / num_points) : 0.0;
@@ -308,7 +504,13 @@ void build_mode(const std::string& data_path) {
     
     // 计算合理的并行度
     const size_t max_threads_build = std::thread::hardware_concurrency();
-    const size_t max_parallel_buckets = std::max(1UL, max_threads_build);  // 同时构建的bucket数量
+    size_t max_parallel_buckets = std::max(1UL, max_threads_build);  // 默认：同时构建的bucket数量=CPU核数
+    if (const char* env_p = std::getenv("BUCKET_BUILD_PARALLELISM")) {
+        try {
+            size_t v = std::stoul(env_p);
+            if (v >= 1) max_parallel_buckets = v;
+        } catch (...) {}
+    }
     const size_t threads_per_bucket = std::max(1UL, max_threads_build / max_parallel_buckets);  // 每个bucket的线程数
     
     std::cout << "Parallel bucket building: " << max_parallel_buckets << " buckets simultaneously, " 
@@ -344,8 +546,19 @@ void build_mode(const std::string& data_path) {
         
         DataSet bucket_data;
         bucket_data.reserve(buckets[i].size());
-        for (const auto& point_idx : buckets[i]) {
-            bucket_data.push_back(get_point_copy(full_dataset_flat, point_idx, dim));
+        if (!use_stream_chunks) {
+            for (const auto& point_idx : buckets[i]) {
+                bucket_data.push_back(get_point_copy(full_dataset_flat, point_idx, dim));
+            }
+        } else {
+            for (const auto& gid : buckets[i]) {
+                DataPoint p;
+                if (!read_vector_from_chunks(chunk_parts, dim, gid, p)) {
+                    std::cerr << "Failed to read gid " << gid << " from chunks" << std::endl;
+                    continue;
+                }
+                bucket_data.push_back(std::move(p));
+            }
         }
         
         std::string bucket_graph_path = resolve_write_path("bucket_" + std::to_string(i) + "_vamana.index");
