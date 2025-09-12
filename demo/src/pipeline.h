@@ -51,6 +51,8 @@ struct QueryContext {
     // 新增：用于 AIO 线程兜底 pread 的对齐起始偏移与 fd 副本
     std::vector<off_t> segment_aligned_starts;   // 每段对齐起始偏移
     int base_fd_copy{-1};
+    // 新增：分批提交游标（已提交的 iocb 数）
+    size_t iocb_submit_cursor{0};
 #endif
 
     // Stage 3 产物

@@ -28,7 +28,7 @@ BQ_EF_SEARCH="${BQ_EF_SEARCH:-196}"             # bqgraph 的 ef 宽度
 BQ_SEEDS="${BQ_SEEDS:-8}"                       # bqgraph 的入口点数
 
 # 新增：查询参数 F 与 K
-DEMO_F_PARAM="${DEMO_F_PARAM:-10}"
+DEMO_F_PARAM="${DEMO_F_PARAM:-20}"
 DEMO_K_PARAM="${DEMO_K_PARAM:-100}"
 
 # 新增：BQ 缓存内存预算（MB）

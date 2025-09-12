@@ -101,12 +101,12 @@ void AIOManager::event_loop(ThreadSafeQueue<std::shared_ptr<QueryContext>>& rera
                     ctx_map_[key] = ctx_sp;
                 }
                 size_t total = ctx_sp->iocb_pointers.size();
-                size_t submitted = 0;
-                while (submitted < total) {
-                    size_t allowance = max_events_ ? (max_events_ - inflight_.load(std::memory_order_relaxed)) : total - submitted;
+                size_t cursor = ctx_sp->iocb_submit_cursor;
+                while (cursor < total) {
+                    size_t allowance = max_events_ ? (max_events_ - inflight_.load(std::memory_order_relaxed)) : (total - cursor);
                     if (allowance == 0) break;
-                    size_t to_submit = std::min(allowance, total - submitted);
-                    long n = ::io_submit(ctx_, (long)to_submit, ctx_sp->iocb_pointers.data() + submitted);
+                    size_t to_submit = std::min(allowance, total - cursor);
+                    long n = ::io_submit(ctx_, (long)to_submit, ctx_sp->iocb_pointers.data() + cursor);
                     if (n <= 0) {
                         // 提交失败：移出并完成空结果，避免卡住
                         {
@@ -117,11 +117,19 @@ void AIOManager::event_loop(ThreadSafeQueue<std::shared_ptr<QueryContext>>& rera
                         QueryResult out; ctx_sp->final_result = out; ctx_sp->promise.set_value(out);
                         break;
                     }
-                    submitted += (size_t)n;
+                    cursor += (size_t)n;
                     inflight_.fetch_add((size_t)n, std::memory_order_relaxed);
                 }
-                ctx_sp->io_requests_submitted = submitted;
-                pending_submit_.pop_front();
+                ctx_sp->iocb_submit_cursor = cursor;
+                if (cursor >= total) {
+                    // 全部段已提交，设置预期完成数为总数
+                    ctx_sp->io_requests_submitted = total;
+                    pending_submit_.pop_front();
+                } else {
+                    // 未提交完，稍后继续
+                    pending_submit_.pop_front();
+                    pending_submit_.push_back(ctx_sp);
+                }
             }
         }
 
@@ -227,8 +235,8 @@ static void execute_io_prep(const std::shared_ptr<QueryContext>& ctx, const Pipe
 
     // 固定对齐与分段参数
     const size_t bs = 4096;
-    const size_t batch_vecs_limit = 256;
-    const size_t batch_mb = 32;
+    const size_t batch_vecs_limit = 128;
+    const size_t batch_mb = 8;
     const size_t batch_bytes_limit = batch_mb * 1024ULL * 1024ULL;
     const size_t gap_gids = 8;
 
