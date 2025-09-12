@@ -727,24 +727,18 @@ void search_mode(const std::string& query_path, const std::string& gt_path) {
             std::string base_path = get_env_str("BASE_FBIN");
             if (base_path.empty()) pipeline_ok = false;
             else {
-                // 根据环境变量决定是否使用 O_DIRECT
-                bool force_odirect = true;
-                if (const char* env_od = std::getenv("RERANK_O_DIRECT")) {
-                    std::string v(env_od);
-                    if (v == "0" || v == "false" || v == "False") force_odirect = false;
-                }
-                int flags = O_RDONLY | (force_odirect ? O_DIRECT : 0);
+                // 强制 O_DIRECT 打开
+                int flags = O_RDONLY | O_DIRECT;
                 base_fd = ::open(base_path.c_str(), flags);
-                if (base_fd < 0 && force_odirect) {
-                    // 若 O_DIRECT 打开失败，回退普通打开
-                    base_fd = ::open(base_path.c_str(), O_RDONLY);
+                if (base_fd < 0) {
+                    // O_DIRECT 打开失败不回退
                 }
                 if (base_fd < 0) pipeline_ok = false;
             }
         }
         if (pipeline_ok) {
             // 初始化 AIO 管理器
-            AIOManager aio(256);
+            AIOManager aio(1024);
             PipelineEnv env{
                 *medoid_index, buckets, bucket_index_cache,
                 dim, static_cast<size_t>(f_val), static_cast<size_t>(k), top_k,

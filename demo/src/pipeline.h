@@ -48,6 +48,9 @@ struct QueryContext {
     std::vector<uint32_t> segment_first_gids;    // 段首 gid
     std::vector<uint32_t> segment_last_gids;     // 段尾 gid（含）
     std::vector<size_t> segment_row_starts;      // 段在 full_precision_vectors 中的起始行
+    // 新增：用于 AIO 线程兜底 pread 的对齐起始偏移与 fd 副本
+    std::vector<off_t> segment_aligned_starts;   // 每段对齐起始偏移
+    int base_fd_copy{-1};
 #endif
 
     // Stage 3 产物
@@ -207,12 +210,18 @@ public:
 
     void request_stop();
 
+    // 新增：仅入队，不在计算线程直接 io_submit
+    void enqueue_reads(const std::shared_ptr<QueryContext>& ctx) { submit_q_.push(ctx); }
+
 private:
     io_context_t ctx_{};
     std::atomic<bool> stop_{false};
     std::atomic<size_t> inflight_{0};
     std::mutex map_mtx_;
     std::unordered_map<void*, std::shared_ptr<QueryContext>> ctx_map_;
+    size_t max_events_{0};
+    ThreadSafeQueue<std::shared_ptr<QueryContext>> submit_q_{};
+    std::deque<std::shared_ptr<QueryContext>> pending_submit_;
 };
 #endif
 
