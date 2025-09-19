@@ -15,10 +15,10 @@ DEMO_BIN="${DEMO_BIN:-$REPO_ROOT/build/demo/demo_test}"
 STREAM_KMEANS_BIN="${STREAM_KMEANS_BIN:-$REPO_ROOT/build/demo/stream_kmeans}"
 
 # 构建产物输出目录
-OUTPUT_DIR="${OUTPUT_DIR:-/data/1/demo/deep}"
+OUTPUT_DIR="${OUTPUT_DIR:-/data/1/demo/gist}"
 
 # 基础数据（base.fbin）路径（请设置为实际文件）
-BASE_FBIN="${BASE_FBIN:-/share/dataset/deep1B.fbin}"    # 例：/data/sift_base.fbin
+BASE_FBIN="${BASE_FBIN:-/data/dataset/gist/gist_base.fbin}"    # 例：/data/sift_base.fbin
 
 # 构建参数（可按需调整）
 USE_BQ="${USE_BQ:-1}"                 # 1 启用 BQ 模式；0 构 raw 的 bucket_vamana.index
@@ -30,12 +30,12 @@ BQ_SATURATE_PASS="${BQ_SATURATE_PASS:-1}"        # 轻量互连/饱和微修复�
 # 可选值：bq (使用BQ向量构图), sq (使用SQ向量构图), no_quantization (使用全精度向量构图)
 # 注意：无论使用哪种模式，最终保存的图都是 BQ 压缩格式
 CONSTRUCT_QUANTIZATION="${CONSTRUCT_QUANTIZATION:-no_quantization}"
-MKL_THREADING_LAYER="${MKL_THREADING_LAYER:-GNU}"
+MKL_THREADING_LAYER="${MKL_THREADING_LAYER:-}"
 
 # 新增：KMeans 模式切换（dist：使用 DistKMeans；stream：使用分块流式 KMeans）
-KMEANS_MODE="${KMEANS_MODE:-stream}"
+KMEANS_MODE="${KMEANS_MODE:-dist}"
 # 当 KMEANS_MODE=stream 时的参数
-EXTERNAL_CENTROIDS_FBIN="${EXTERNAL_CENTROIDS_FBIN:-/data/1/demo/deep/centroids.fbin}"
+EXTERNAL_CENTROIDS_FBIN="${EXTERNAL_CENTROIDS_FBIN:-/data/1/demo/gist/centroids.fbin}"
 CHUNK_DIR="${CHUNK_DIR:-/data/dataset/deep/chunk}"              # 例如：/data/dataset/deep/chunk
 BUCKET_BUILD_START="${BUCKET_BUILD_START:-0}"
 BUCKET_BUILD_END="${BUCKET_BUILD_END:-1023}"
@@ -48,7 +48,7 @@ KMEANS_BATCH_GIB="${KMEANS_BATCH_GIB:-20.0}"          # 每批最大GiB
 KMEANS_INIT_SAMPLE_GIB="${KMEANS_INIT_SAMPLE_GIB:-10.0}"  # KMeans++ reservoir 采样GiB
 CENTROIDS_OUT="${CENTROIDS_OUT:-/data/1/demo/deep/centroids.fbin}"
 # 并行构桶个数（可选，默认=CPU核数）
-BUCKET_BUILD_PARALLELISM="${BUCKET_BUILD_PARALLELISM:-1}"
+BUCKET_BUILD_PARALLELISM="${BUCKET_BUILD_PARALLELISM:-}"
 # 新增：构建阶段总内存上限（GiB），用于流式分桶批量大小和并行度控制
 CONSTRUCT_MAX_GB="${CONSTRUCT_MAX_GB:-50}"
 # =====================================
@@ -76,15 +76,20 @@ cat <<EOF
 [demo build] BQ_SATURATE_PASS     : $BQ_SATURATE_PASS
 [demo build] CONSTRUCT_QUANTIZATION: $CONSTRUCT_QUANTIZATION
 [demo build] KMEANS_MODE          : $KMEANS_MODE
-[demo build] EXTERNAL_CENTROIDS_FBIN: $EXTERNAL_CENTROIDS_FBIN
-[demo build] BUCKET_BUILD_START    : $BUCKET_BUILD_START
-[demo build] BUCKET_BUILD_END      : $BUCKET_BUILD_END
 [demo build] BUCKET_BUILD_PARALLELISM: ${BUCKET_BUILD_PARALLELISM:-auto}
 [demo build] CONSTRUCT_MAX_GB     : ${CONSTRUCT_MAX_GB:-unset}
 [demo build] MKL_THREADING_LAYER : $MKL_THREADING_LAYER
-[demo build] OMP_MAX_ACTIVE_LEVELS: $OMP_MAX_ACTIVE_LEVELS
-[demo build] OMP_NESTED          : $OMP_NESTED
 EOF
+
+# 仅在 stream 模式下展示流式相关参数
+if [[ "$KMEANS_MODE" == "stream" ]]; then
+  cat <<EOF
+[demo build] EXTERNAL_CENTROIDS_FBIN: $EXTERNAL_CENTROIDS_FBIN
+[demo build] CHUNK_DIR            : $CHUNK_DIR
+[demo build] BUCKET_BUILD_START    : $BUCKET_BUILD_START
+[demo build] BUCKET_BUILD_END      : $BUCKET_BUILD_END
+EOF
+fi
 
 # 若选择流式 KMeans，先产出质心
 if [[ "$KMEANS_MODE" == "stream" ]]; then
@@ -119,8 +124,7 @@ if [[ "$KMEANS_MODE" == "stream" ]]; then
 fi
 
 # 运行构建
-MALLOC_CHECK_=3 \
-MALLOC_PERTURB_=165 \
+if [[ "$KMEANS_MODE" == "stream" ]]; then
 DEMO_OUTPUT_DIR="$OUTPUT_DIR" \
 USE_BQ="$USE_BQ" \
 BQ_BITS="$BQ_BITS" \
@@ -135,8 +139,19 @@ CONSTRUCT_MAX_GB="${CONSTRUCT_MAX_GB}" \
 MKL_THREADING_LAYER="$MKL_THREADING_LAYER" \
 BUCKET_BUILD_START="$BUCKET_BUILD_START" \
 BUCKET_BUILD_END="$BUCKET_BUILD_END" \
-OMP_MAX_ACTIVE_LEVELS="$OMP_MAX_ACTIVE_LEVELS" \
-OMP_NESTED="$OMP_NESTED" \
 "$DEMO_BIN" "$BASE_FBIN"
+else
+DEMO_OUTPUT_DIR="$OUTPUT_DIR" \
+USE_BQ="$USE_BQ" \
+BQ_BITS="$BQ_BITS" \
+BQ_GRAPH_THRESHOLD="$BQ_GRAPH_THRESHOLD" \
+BQ_SATURATE_PASS="$BQ_SATURATE_PASS" \
+CONSTRUCT_QUANTIZATION="$CONSTRUCT_QUANTIZATION" \
+BUCKET_BUILD_PARALLELISM="${BUCKET_BUILD_PARALLELISM}" \
+KMEANS_MODE="$KMEANS_MODE" \
+CONSTRUCT_MAX_GB="${CONSTRUCT_MAX_GB}" \
+MKL_THREADING_LAYER="$MKL_THREADING_LAYER" \
+"$DEMO_BIN" "$BASE_FBIN"
+fi
 
 echo "[demo build] artifacts written to: $OUTPUT_DIR" 

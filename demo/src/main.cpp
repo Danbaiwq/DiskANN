@@ -129,7 +129,7 @@ void build_mode(const std::string& data_path) {
     const float alpha = 0.01f;
     const size_t m = 1024;
     const int t = 8;
-    const int l = 5;
+    const int l = 10;
     const float beta = 1.6f;  // 新增：距离比例约束参数
     const size_t graph_degree = 32;
     const size_t build_complexity = 50;
