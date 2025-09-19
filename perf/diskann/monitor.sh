@@ -4,13 +4,13 @@
 /home/danbai.wq/DiskANN/build/apps/search_disk_index \
   --data_type float \
   --dist_fn l2 \
-  --index_path_prefix /data/1/perf/diskann/disk_index_gist_base_R32_L50_A1.2 \
-  --query_file /home/danbai.wq/DiskANN/build/data/gist_query.fbin \
-  --gt_file /home/danbai.wq/DiskANN/build/data/gist_query_base_gt100 \
-  -K 100 \
-  -L 200 400 600 800 1000 1200 1400\
-  --result_path /home/danbai.wq/DiskANN/build/data/res \
-  --num_nodes_to_cache 100000 \
+  --index_path_prefix /data/1/perf/diskann/disk_index_gist_base_R32_L50_A1.03 \
+  --query_file /data/dataset/gist/gist_query.fbin \
+  --gt_file /data/dataset/gist/gist_query_base_gt100 \
+  -K 10 \
+  -L 600 800 1000 1200 1400 1600 1800 2000 2200 2400 2600 2800 3000\
+  --result_path /data/1/perf/diskann/res \
+  --num_nodes_to_cache 1000 \
   -W 32 \
   -T 32 &
 

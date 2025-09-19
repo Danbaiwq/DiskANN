@@ -14,7 +14,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DEMO_BIN="${DEMO_BIN:-$REPO_ROOT/build/demo/demo_test}"
 
 # 索引产物所在目录（构建脚本写入的位置）
-INDEX_DIR="${INDEX_DIR:-/data/1/demo/deep}"
+INDEX_DIR="${INDEX_DIR:-/data/1/demo/gist}"
 
 # 查询数据与评测 GT 路径（请设置为实际文件）
 QUERY_FBIN="${QUERY_FBIN:-/data/dataset/gist/gist_query.fbin}"            # 例：/data/sift_query.fbin
@@ -28,7 +28,7 @@ BQ_EF_SEARCH="${BQ_EF_SEARCH:-196}"             # bqgraph 的 ef 宽度
 BQ_SEEDS="${BQ_SEEDS:-8}"                       # bqgraph 的入口点数
 
 # 新增：查询参数 F 与 K
-DEMO_F_PARAM="${DEMO_F_PARAM:-20}"
+DEMO_F_PARAM="${DEMO_F_PARAM:-15}"
 DEMO_K_PARAM="${DEMO_K_PARAM:-100}"
 
 # 新增：BQ 缓存内存预算（MB）

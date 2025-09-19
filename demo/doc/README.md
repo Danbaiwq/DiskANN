@@ -242,7 +242,7 @@ python3 /home/danbai.wq/DiskANN/demo/scripts/split_fbin.py \
 - 仅使用外部质心（不修改 build.sh）：
   - 在运行构建前设置环境变量 `EXTERNAL_CENTROIDS_FBIN` 指向质心 `.fbin`，程序会自动加载并跳过 DistKMeans；未设置则按原流程执行 DistKMeans。
 ```bash
-EXTERNAL_CENTROIDS_FBIN=/data/1/demo/gist/centroids.fbin \
+nohup EXTERNAL_CENTROIDS_FBIN=/data/1/demo/deep/centroids.fbin \
 ./demo/scripts/build.sh
 ```
 

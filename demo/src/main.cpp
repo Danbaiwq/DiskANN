@@ -129,7 +129,7 @@ void build_mode(const std::string& data_path) {
     const float alpha = 0.01f;
     const size_t m = 1024;
     const int t = 8;
-    const int l = 10;
+    const int l = 5;
     const float beta = 1.6f;  // 新增：距离比例约束参数
     const size_t graph_degree = 32;
     const size_t build_complexity = 50;
@@ -280,182 +280,204 @@ void build_mode(const std::string& data_path) {
         }
     }
     
-    // --- 均衡后的分桶策略（容量约束 + 次近回退） ---
-    std::cout << "Starting balanced vector bucketing with capacity constraint..." << std::endl;
-
-    Buckets buckets(m);
+    // --- 可复用 buckets.bin：若存在则直接加载并跳过分桶 ---
+    Buckets buckets;
     size_t total_bucket_assignments = 0;
-
-    // 每个簇的容量上限：不超过 (l * N) / m
-    const size_t per_cluster_cap = (static_cast<size_t>(l) * num_points) / m;
-    std::vector<size_t> cluster_load(m, 0);
-
-    if (!use_stream_chunks) {
-        // 原内存路径：先按样本到最近质心的距离排序，再分配
-        std::vector<std::pair<float, uint32_t>> point_order(num_points);
-        #pragma omp parallel for
-        for (size_t i = 0; i < num_points; ++i) {
-            DataPoint point = get_point_copy(full_dataset_flat, i, dim);
-            float best = std::numeric_limits<float>::max();
-            for (uint32_t j = 0; j < m; ++j) {
-                float d = calculate_distance(point, final_centroids[j]);
-                if (d < best) best = d;
+    bool reuse_buckets = false;
+    {
+        std::ifstream bin_in(resolve_read_path("buckets.bin"), std::ios::binary);
+        if (bin_in.is_open()) {
+            bin_in.close();
+            auto loaded = load_buckets(resolve_read_path("buckets.bin"));
+            if (!loaded.empty()) {
+                buckets.swap(loaded);
+                reuse_buckets = true;
+                for (const auto& b : buckets) total_bucket_assignments += b.size();
+                std::cout << "Reusing existing buckets.bin (assignments=" << total_bucket_assignments << ")" << std::endl;
             }
-            point_order[i] = {best, static_cast<uint32_t>(i)};
         }
-        std::sort(point_order.begin(), point_order.end());
+    }
+    
+    // --- 均衡后的分桶策略（容量约束 + 次近回退） ---
+    if (!reuse_buckets) {
+        std::cout << "Starting balanced vector bucketing with capacity constraint..." << std::endl;
 
-        std::vector<std::atomic<size_t>> cluster_load_atomic(m);
-        for (size_t c = 0; c < m; ++c) cluster_load_atomic[c].store(cluster_load[c], std::memory_order_relaxed);
+        buckets.assign(m, {});
+        total_bucket_assignments = 0;
 
-        const size_t num_threads = std::max(1, omp_get_max_threads());
-        std::vector<Buckets> thread_local_buckets(num_threads, Buckets(m));
-        std::vector<size_t> thread_local_counts(num_threads, 0);
-
-        #pragma omp parallel for schedule(dynamic, 256)
-        for (size_t ord = 0; ord < point_order.size(); ++ord) {
-            int tid = omp_get_thread_num();
-            uint32_t i = point_order[ord].second;
-            DataPoint point = get_point_copy(full_dataset_flat, i, dim);
-            std::vector<std::pair<float, uint32_t>> dists;
-            dists.reserve(m);
-            for (uint32_t j = 0; j < m; ++j) {
-                dists.push_back({calculate_distance(point, final_centroids[j]), j});
+        // 每个簇的容量上限：不超过 (l * N) / m
+        const size_t per_cluster_cap = (static_cast<size_t>(l) * num_points) / m;
+        std::vector<size_t> cluster_load(m, 0);
+    
+        if (!use_stream_chunks) {
+            // 原内存路径：先按样本到最近质心的距离排序，再分配
+            std::vector<std::pair<float, uint32_t>> point_order(num_points);
+            #pragma omp parallel for
+            for (size_t i = 0; i < num_points; ++i) {
+                DataPoint point = get_point_copy(full_dataset_flat, i, dim);
+                float best = std::numeric_limits<float>::max();
+                for (uint32_t j = 0; j < m; ++j) {
+                    float d = calculate_distance(point, final_centroids[j]);
+                    if (d < best) best = d;
+                }
+                point_order[i] = {best, static_cast<uint32_t>(i)};
             }
-            std::sort(dists.begin(), dists.end());
-
-            size_t assigned = 0;
-            float dist1 = dists[0].first;
-            for (size_t idx = 0; idx < dists.size() && assigned < static_cast<size_t>(l); ++idx) {
-                uint32_t cid = dists[idx].second;
-                float dist_k = dists[idx].first;
-                if (!(idx == 0 || (beta * dist1 >= dist_k))) continue;
-                size_t cur = cluster_load_atomic[cid].load(std::memory_order_relaxed);
-                while (cur < per_cluster_cap) {
-                    if (cluster_load_atomic[cid].compare_exchange_weak(cur, cur + 1, std::memory_order_acq_rel)) {
-                        thread_local_buckets[tid][cid].push_back(i);
-                        thread_local_counts[tid] += 1;
-                        assigned += 1;
-                        break;
+            std::sort(point_order.begin(), point_order.end());
+    
+            std::vector<std::atomic<size_t>> cluster_load_atomic(m);
+            for (size_t c = 0; c < m; ++c) cluster_load_atomic[c].store(cluster_load[c], std::memory_order_relaxed);
+    
+            const size_t num_threads = std::max(1, omp_get_max_threads());
+            std::vector<Buckets> thread_local_buckets(num_threads, Buckets(m));
+            std::vector<size_t> thread_local_counts(num_threads, 0);
+    
+            #pragma omp parallel for schedule(dynamic, 256)
+            for (size_t ord = 0; ord < point_order.size(); ++ord) {
+                int tid = omp_get_thread_num();
+                uint32_t i = point_order[ord].second;
+                DataPoint point = get_point_copy(full_dataset_flat, i, dim);
+                std::vector<std::pair<float, uint32_t>> dists;
+                dists.reserve(m);
+                for (uint32_t j = 0; j < m; ++j) {
+                    dists.push_back({calculate_distance(point, final_centroids[j]), j});
+                }
+                std::sort(dists.begin(), dists.end());
+    
+                size_t assigned = 0;
+                float dist1 = dists[0].first;
+                for (size_t idx = 0; idx < dists.size() && assigned < static_cast<size_t>(l); ++idx) {
+                    uint32_t cid = dists[idx].second;
+                    float dist_k = dists[idx].first;
+                    if (!(idx == 0 || (beta * dist1 >= dist_k))) continue;
+                    size_t cur = cluster_load_atomic[cid].load(std::memory_order_relaxed);
+                    while (cur < per_cluster_cap) {
+                        if (cluster_load_atomic[cid].compare_exchange_weak(cur, cur + 1, std::memory_order_acq_rel)) {
+                            thread_local_buckets[tid][cid].push_back(i);
+                            thread_local_counts[tid] += 1;
+                            assigned += 1;
+                            break;
+                        }
                     }
                 }
             }
-        }
-
-        // 合并线程本地结果
-        for (int tid = 0; tid < static_cast<int>(num_threads); ++tid) {
+    
+            // 合并线程本地结果
+            for (int tid = 0; tid < static_cast<int>(num_threads); ++tid) {
+                for (size_t cid = 0; cid < m; ++cid) {
+                    if (!thread_local_buckets[tid][cid].empty()) {
+                        auto& dst = buckets[cid];
+                        auto& src = thread_local_buckets[tid][cid];
+                        dst.insert(dst.end(), src.begin(), src.end());
+                    }
+                }
+                total_bucket_assignments += thread_local_counts[tid];
+            }
+    
             for (size_t cid = 0; cid < m; ++cid) {
-                if (!thread_local_buckets[tid][cid].empty()) {
-                    auto& dst = buckets[cid];
-                    auto& src = thread_local_buckets[tid][cid];
-                    dst.insert(dst.end(), src.begin(), src.end());
-                }
+                cluster_load[cid] = buckets[cid].size();
             }
-            total_bucket_assignments += thread_local_counts[tid];
-        }
-
-        for (size_t cid = 0; cid < m; ++cid) {
-            cluster_load[cid] = buckets[cid].size();
-        }
-    } else {
-        // 流式路径：逐 part / block 处理，块内并行；按 CONSTRUCT_MAX_GB 动态确定批大小
-        double mem_cap_gb = 0.0;
-        if (const char* env_mem = std::getenv("CONSTRUCT_MAX_GB")) {
-            try { mem_cap_gb = std::stod(env_mem); } catch (...) { mem_cap_gb = 0.0; }
-        }
-        const uint64_t vec_bytes = static_cast<uint64_t>(dim) * sizeof(float);
-        // 预留 2 倍空间（输入+线程本地缓冲开销），每批最多载入的向量数：
-        uint64_t batch_vec_cap = 0;
-        if (mem_cap_gb > 0.0) {
-            long double bytes = static_cast<long double>(mem_cap_gb) * (1ull<<30);
-            uint64_t cap = static_cast<uint64_t>(bytes / (2.0L * vec_bytes));
-            batch_vec_cap = std::max<uint64_t>(1, cap);
-        }
-        const uint64_t fallback_block_vecs = std::max<uint64_t>(1, (256ull << 20) / vec_bytes); // 256MiB
-
-        for (const auto& part : chunk_parts) {
-            std::ifstream in(part.path, std::ios::binary);
-            if (!in.is_open()) { std::cerr << "Failed to open part: " << part.path << std::endl; return; }
-            uint32_t n = 0, d = 0; in.read(reinterpret_cast<char*>(&n), 4); in.read(reinterpret_cast<char*>(&d), 4);
-            if (static_cast<size_t>(d) != dim) { std::cerr << "Dim mismatch in part: " << part.path << std::endl; return; }
-            std::cout << "[stream bucketing] part begin: path=" << part.path << ", n=" << n << ", start_gid=" << part.start_gid << std::endl;
-            uint64_t remaining = n;
-            uint64_t local_index = 0;
-            size_t block_idx = 0;
-            while (remaining > 0) {
-                uint64_t block_vecs = batch_vec_cap > 0 ? std::min<uint64_t>(remaining, batch_vec_cap)
-                                                        : std::min<uint64_t>(remaining, fallback_block_vecs);
-                std::vector<float> buf;
-                buf.resize(block_vecs * dim);
-                const uint64_t bytes = block_vecs * vec_bytes;
-                in.read(reinterpret_cast<char*>(buf.data()), static_cast<std::streamsize>(bytes));
-                if (static_cast<uint64_t>(in.gcount()) != bytes) { std::cerr << "Short read in part: " << part.path << std::endl; return; }
-
-                // 进度：全局与分块
-                double global_done = 100.0 * static_cast<double>(part.start_gid + local_index) / static_cast<double>(num_points);
-                std::cout << "[stream bucketing] part_block " << block_idx << ": vecs=" << block_vecs
-                          << ", global=" << std::fixed << std::setprecision(2) << global_done << "%" << std::endl;
-
-                // 块内并行：thread-local buckets + 原子限容量
-                const size_t num_threads = std::max(1, omp_get_max_threads());
-                std::vector<Buckets> thread_local_buckets(num_threads, Buckets(m));
-                std::vector<size_t> thread_local_counts(num_threads, 0);
-
-                // 原子 cluster_load 视为全局容量表
-                std::vector<std::atomic<size_t>> cluster_load_atomic(m);
-                for (size_t c = 0; c < m; ++c) cluster_load_atomic[c].store(cluster_load[c], std::memory_order_relaxed);
-
-                #pragma omp parallel for schedule(static)
-                for (int64_t i = 0; i < static_cast<int64_t>(block_vecs); ++i) {
-                    int tid = omp_get_thread_num();
-                    DataPoint point(dim);
-                    std::copy(buf.data() + static_cast<size_t>(i)*dim, buf.data() + static_cast<size_t>(i+1)*dim, point.begin());
-                    std::vector<std::pair<float, uint32_t>> dists;
-                    dists.reserve(m);
-                    for (uint32_t j = 0; j < m; ++j) {
-                        dists.push_back({calculate_distance(point, final_centroids[j]), j});
-                    }
-                    std::sort(dists.begin(), dists.end());
-                    size_t assigned = 0;
-                    float dist1 = dists[0].first;
-                    uint64_t gid = part.start_gid + local_index + static_cast<uint64_t>(i);
-                    for (size_t idx = 0; idx < dists.size() && assigned < static_cast<size_t>(l); ++idx) {
-                        uint32_t cid = dists[idx].second;
-                        float dist_k = dists[idx].first;
-                        if (!(idx == 0 || (beta * dist1 >= dist_k))) continue;
-                        size_t cur = cluster_load_atomic[cid].load(std::memory_order_relaxed);
-                        while (cur < per_cluster_cap) {
-                            if (cluster_load_atomic[cid].compare_exchange_weak(cur, cur + 1, std::memory_order_acq_rel)) {
-                                thread_local_buckets[tid][cid].push_back(static_cast<uint32_t>(gid));
-                                thread_local_counts[tid] += 1;
-                                assigned += 1;
-                                break;
+        } else {
+            // 流式路径：逐 part / block 处理，块内并行；按 CONSTRUCT_MAX_GB 动态确定批大小
+            double mem_cap_gb = 0.0;
+            if (const char* env_mem = std::getenv("CONSTRUCT_MAX_GB")) {
+                try { mem_cap_gb = std::stod(env_mem); } catch (...) { mem_cap_gb = 0.0; }
+            }
+            const uint64_t vec_bytes = static_cast<uint64_t>(dim) * sizeof(float);
+            // 预留 2 倍空间（输入+线程本地缓冲开销），每批最多载入的向量数：
+            uint64_t batch_vec_cap = 0;
+            if (mem_cap_gb > 0.0) {
+                long double bytes = static_cast<long double>(mem_cap_gb) * (1ull<<30);
+                uint64_t cap = static_cast<uint64_t>(bytes / (2.0L * vec_bytes));
+                batch_vec_cap = std::max<uint64_t>(1, cap);
+            }
+            const uint64_t fallback_block_vecs = std::max<uint64_t>(1, (256ull << 20) / vec_bytes); // 256MiB
+    
+            for (const auto& part : chunk_parts) {
+                std::ifstream in(part.path, std::ios::binary);
+                if (!in.is_open()) { std::cerr << "Failed to open part: " << part.path << std::endl; return; }
+                uint32_t n = 0, d = 0; in.read(reinterpret_cast<char*>(&n), 4); in.read(reinterpret_cast<char*>(&d), 4);
+                if (static_cast<size_t>(d) != dim) { std::cerr << "Dim mismatch in part: " << part.path << std::endl; return; }
+                std::cout << "[stream bucketing] part begin: path=" << part.path << ", n=" << n << ", start_gid=" << part.start_gid << std::endl;
+                uint64_t remaining = n;
+                uint64_t local_index = 0;
+                size_t block_idx = 0;
+                while (remaining > 0) {
+                    uint64_t block_vecs = batch_vec_cap > 0 ? std::min<uint64_t>(remaining, batch_vec_cap)
+                                                            : std::min<uint64_t>(remaining, fallback_block_vecs);
+                    std::vector<float> buf;
+                    buf.resize(block_vecs * dim);
+                    const uint64_t bytes = block_vecs * vec_bytes;
+                    in.read(reinterpret_cast<char*>(buf.data()), static_cast<std::streamsize>(bytes));
+                    if (static_cast<uint64_t>(in.gcount()) != bytes) { std::cerr << "Short read in part: " << part.path << std::endl; return; }
+    
+                    // 进度：全局与分块
+                    double global_done = 100.0 * static_cast<double>(part.start_gid + local_index) / static_cast<double>(num_points);
+                    std::cout << "[stream bucketing] part_block " << block_idx << ": vecs=" << block_vecs
+                              << ", global=" << std::fixed << std::setprecision(2) << global_done << "%" << std::endl;
+    
+                    // 块内并行：thread-local buckets + 原子限容量
+                    const size_t num_threads = std::max(1, omp_get_max_threads());
+                    std::vector<Buckets> thread_local_buckets(num_threads, Buckets(m));
+                    std::vector<size_t> thread_local_counts(num_threads, 0);
+    
+                    // 原子 cluster_load 视为全局容量表
+                    std::vector<std::atomic<size_t>> cluster_load_atomic(m);
+                    for (size_t c = 0; c < m; ++c) cluster_load_atomic[c].store(cluster_load[c], std::memory_order_relaxed);
+    
+                    #pragma omp parallel for schedule(static)
+                    for (int64_t i = 0; i < static_cast<int64_t>(block_vecs); ++i) {
+                        int tid = omp_get_thread_num();
+                        DataPoint point(dim);
+                        std::copy(buf.data() + static_cast<size_t>(i)*dim, buf.data() + static_cast<size_t>(i+1)*dim, point.begin());
+                        std::vector<std::pair<float, uint32_t>> dists;
+                        dists.reserve(m);
+                        for (uint32_t j = 0; j < m; ++j) {
+                            dists.push_back({calculate_distance(point, final_centroids[j]), j});
+                        }
+                        std::sort(dists.begin(), dists.end());
+                        size_t assigned = 0;
+                        float dist1 = dists[0].first;
+                        uint64_t gid = part.start_gid + local_index + static_cast<uint64_t>(i);
+                        for (size_t idx = 0; idx < dists.size() && assigned < static_cast<size_t>(l); ++idx) {
+                            uint32_t cid = dists[idx].second;
+                            float dist_k = dists[idx].first;
+                            if (!(idx == 0 || (beta * dist1 >= dist_k))) continue;
+                            size_t cur = cluster_load_atomic[cid].load(std::memory_order_relaxed);
+                            while (cur < per_cluster_cap) {
+                                if (cluster_load_atomic[cid].compare_exchange_weak(cur, cur + 1, std::memory_order_acq_rel)) {
+                                    thread_local_buckets[tid][cid].push_back(static_cast<uint32_t>(gid));
+                                    thread_local_counts[tid] += 1;
+                                    assigned += 1;
+                                    break;
+                                }
                             }
                         }
                     }
-                }
-
-                // 合并线程本地结果
-                for (int tid = 0; tid < static_cast<int>(num_threads); ++tid) {
-                    for (size_t cid = 0; cid < m; ++cid) {
-                        if (!thread_local_buckets[tid][cid].empty()) {
-                            auto& dst = buckets[cid];
-                            auto& src = thread_local_buckets[tid][cid];
-                            dst.insert(dst.end(), src.begin(), src.end());
+    
+                    // 合并线程本地结果
+                    for (int tid = 0; tid < static_cast<int>(num_threads); ++tid) {
+                        for (size_t cid = 0; cid < m; ++cid) {
+                            if (!thread_local_buckets[tid][cid].empty()) {
+                                auto& dst = buckets[cid];
+                                auto& src = thread_local_buckets[tid][cid];
+                                dst.insert(dst.end(), src.begin(), src.end());
+                            }
                         }
+                        total_bucket_assignments += thread_local_counts[tid];
                     }
-                    total_bucket_assignments += thread_local_counts[tid];
+                    // 同步 cluster_load 为本批次后的值
+                    for (size_t cid = 0; cid < m; ++cid) cluster_load[cid] = cluster_load_atomic[cid].load(std::memory_order_relaxed);
+    
+                    local_index += block_vecs;
+                    remaining -= block_vecs;
+                    ++block_idx;
                 }
-                // 同步 cluster_load 为本批次后的值
-                for (size_t cid = 0; cid < m; ++cid) cluster_load[cid] = cluster_load_atomic[cid].load(std::memory_order_relaxed);
-
-                local_index += block_vecs;
-                remaining -= block_vecs;
-                ++block_idx;
+                in.close();
+                std::cout << "[stream bucketing] part end: path=" << part.path << ", total_assigned=" << total_bucket_assignments << std::endl;
             }
-            in.close();
-            std::cout << "[stream bucketing] part end: path=" << part.path << ", total_assigned=" << total_bucket_assignments << std::endl;
         }
+    } else {
+        std::cout << "Reusing existing buckets; skip bucketing." << std::endl;
     }
 
     double average_buckets_per_vector = total_bucket_assignments ? (static_cast<double>(total_bucket_assignments) / num_points) : 0.0;
@@ -479,16 +501,18 @@ void build_mode(const std::string& data_path) {
     }
     
     // --- Save Buckets & Metadata ---
-    std::cout << "Saving bucket assignments and metadata..." << std::endl;
-    save_buckets(resolve_write_path("buckets.bin"), buckets);
-    std::ofstream meta_writer(resolve_write_path("medoid_meta.txt"));
-    meta_writer << dim << std::endl;
-    meta_writer << graph_degree << std::endl;
-    meta_writer << beta << std::endl;  // 保存beta参数到元数据
-    meta_writer << average_buckets_per_vector << std::endl;  // 保存平均分桶数
-    meta_writer << (use_bq ? 1 : 0) << std::endl; // 是否使用bq
-    meta_writer << bq_bits << std::endl; // bq bits
-    meta_writer.close();
+    if (!reuse_buckets) {
+        std::cout << "Saving bucket assignments and metadata..." << std::endl;
+        save_buckets(resolve_write_path("buckets.bin"), buckets);
+        std::ofstream meta_writer(resolve_write_path("medoid_meta.txt"));
+        meta_writer << dim << std::endl;
+        meta_writer << graph_degree << std::endl;
+        meta_writer << beta << std::endl;  // 保存beta参数到元数据
+        meta_writer << average_buckets_per_vector << std::endl;  // 保存平均分桶数
+        meta_writer << (use_bq ? 1 : 0) << std::endl; // 是否使用bq
+        meta_writer << bq_bits << std::endl; // bq bits
+        meta_writer.close();
+    }
 
     // --- Build Medoid Vamana Graph ---
     std::cout << "Building Medoid Vamana Graph (using " << threads_per_build << " threads)..." << std::endl;
@@ -520,8 +544,23 @@ void build_mode(const std::string& data_path) {
     
     
     // 准备所有需要构建的bucket
+    // 可选：通过环境变量限制构建范围（含端点，0-based）。用于诊断：仅构建某几个桶
+    int env_start = get_env_int("BUCKET_BUILD_START", 0);
+    int env_end = get_env_int("BUCKET_BUILD_END", static_cast<int>(m) - 1);
+    size_t start_id = env_start < 0 ? 0 : static_cast<size_t>(env_start);
+    size_t end_id = env_end < 0 ? 0 : static_cast<size_t>(env_end);
+    if (m > 0) {
+        if (start_id >= m) start_id = m - 1;
+        if (end_id >= m) end_id = m - 1;
+        if (start_id > end_id) std::swap(start_id, end_id);
+    } else {
+        start_id = 0; end_id = 0;
+    }
+    std::cout << "Bucket build range: [" << start_id << "," << end_id << "]" << std::endl;
+
     std::vector<size_t> buckets_to_build;
     for (size_t i = 0; i < m; ++i) {
+        if (i < start_id || i > end_id) continue;
         if (buckets[i].size() >= MIN_BUCKET_SIZE_FOR_INDEX) {
             buckets_to_build.push_back(i);
         } else {
@@ -568,7 +607,9 @@ void build_mode(const std::string& data_path) {
             build_and_save_vamana_graph(bucket_data, {}, bucket_graph_path, graph_degree, build_complexity, threads_per_bucket);
         } else {
             // 读取 BQ_GRAPH_THRESHOLD 环境变量，默认 1000
-            size_t padded_dim = (dim + 3) / 4 * 4;
+            size_t ex_bits = (bq_bits > 1) ? (bq_bits - 1) : 0;
+            size_t align = (ex_bits == 3 || ex_bits == 5 || ex_bits == 7) ? 64ULL : 16ULL;
+            size_t padded_dim = ((dim + align - 1) / align) * align;
             if (buckets[i].size() >= bq_graph_threshold) {
                 std::string gpath = resolve_write_path("bucket_" + std::to_string(i) + "_bqgraph.bin");
                 BQBuildConfig cfg{ padded_dim, bq_bits, graph_degree, build_complexity, 1.2f, construct_mode };
