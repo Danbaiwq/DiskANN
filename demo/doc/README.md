@@ -13,7 +13,7 @@
 - 输入数据：`<base>.fbin`（float32，头部 `uint32 n, uint32 dim`），查询 `<query>.fbin`，评测 GT `<gt>.ivecs`。
 - 构建产物（位于 `DEMO_OUTPUT_DIR`）：
   - `buckets.bin`：每桶局部ID → 全局ID 映射
-  - `medoid_vamana.index`：质心图（粗筛）
+  - `medoid_vamana.index`：质心图（粗筛）            
   - 桶内：
     - RAW 模式：`bucket_<i>_vamana.index`
     - BQ 模式：小桶 `bucket_<i>_bq.bin`；大桶 `bucket_<i>_bqgraph.bin`
