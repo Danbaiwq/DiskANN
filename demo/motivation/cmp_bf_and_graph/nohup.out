@@ -94,3 +94,537 @@
 [hnsw M=32 efC=200 efS=256 metric=l2] N=50000 d=96 topk=10 nq=1000 threads=32 build=23.706s search=0.181s qps=5534.8 avg=0.181ms p50=1.182ms p95=2.107ms p99=10.627ms recall=0.9794
 [hnsw M=32 efC=200 efS=384 metric=l2] N=50000 d=96 topk=10 nq=1000 threads=32 build=10.665s search=0.518s qps=1929.3 avg=0.518ms p50=1.616ms p95=3.003ms p99=22.748ms recall=0.9913
 [hnsw M=32 efC=200 efS=512 metric=l2] N=50000 d=96 topk=10 nq=1000 threads=32 build=11.327s search=0.449s qps=2224.8 avg=0.449ms p50=2.265ms p95=4.247ms p99=22.687ms recall=0.9951
+[hnsw M=32 efC=200 efS=640 metric=l2] N=50000 d=96 topk=10 nq=1000 threads=32 build=25.688s search=0.500s qps=1998.2 avg=0.500ms p50=3.167ms p95=4.852ms p99=25.428ms recall=0.9966
+[hnsw M=32 efC=200 efS=768 metric=l2] N=50000 d=96 topk=10 nq=1000 threads=32 build=27.223s search=0.677s qps=1476.3 avg=0.677ms p50=3.913ms p95=5.832ms p99=22.068ms recall=0.9981
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=50000 d=96 topk=10 nq=1000 threads=32 build=0.006s search=0.745s qps=1342.7 avg=0.745ms p50=2.060ms p95=3.013ms p99=18.670ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=50000 d=96 topk=10 nq=1000 threads=32 build=21.999s search=0.070s qps=14309.3 avg=0.070ms p50=0.496ms p95=8.875ms p99=10.414ms recall=0.8080
+[hnsw M=32 efC=200 efS=128 metric=l2] N=50000 d=96 topk=10 nq=1000 threads=32 build=10.955s search=0.116s qps=8601.0 avg=0.116ms p50=0.774ms p95=1.471ms p99=20.269ms recall=0.9217
+[hnsw M=32 efC=200 efS=256 metric=l2] N=50000 d=96 topk=10 nq=1000 threads=32 build=24.026s search=0.189s qps=5286.2 avg=0.189ms p50=1.160ms p95=2.417ms p99=23.896ms recall=0.9775
+[hnsw M=32 efC=200 efS=384 metric=l2] N=50000 d=96 topk=10 nq=1000 threads=32 build=23.833s search=0.321s qps=3113.2 avg=0.321ms p50=1.909ms p95=3.431ms p99=24.227ms recall=0.9909
+[hnsw M=32 efC=200 efS=512 metric=l2] N=50000 d=96 topk=10 nq=1000 threads=32 build=25.897s search=0.395s qps=2530.1 avg=0.395ms p50=2.547ms p95=11.824ms p99=12.760ms recall=0.9941
+[hnsw M=32 efC=200 efS=640 metric=l2] N=50000 d=96 topk=10 nq=1000 threads=32 build=31.576s search=0.564s qps=1773.7 avg=0.564ms p50=3.346ms p95=3.844ms p99=29.518ms recall=0.9961
+[hnsw M=32 efC=200 efS=768 metric=l2] N=50000 d=96 topk=10 nq=1000 threads=32 build=26.328s search=0.672s qps=1487.9 avg=0.672ms p50=3.619ms p95=4.971ms p99=26.920ms recall=0.9971
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=100000 d=96 topk=10 nq=1000 threads=32 build=0.012s search=0.985s qps=1014.9 avg=0.985ms p50=5.340ms p95=6.420ms p99=22.504ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=100000 d=96 topk=10 nq=1000 threads=32 build=66.079s search=0.098s qps=10192.9 avg=0.098ms p50=0.498ms p95=0.893ms p99=20.805ms recall=0.7218
+[hnsw M=32 efC=200 efS=128 metric=l2] N=100000 d=96 topk=10 nq=1000 threads=32 build=64.436s search=0.129s qps=7759.4 avg=0.129ms p50=0.954ms p95=1.489ms p99=25.351ms recall=0.8670
+[hnsw M=32 efC=200 efS=256 metric=l2] N=100000 d=96 topk=10 nq=1000 threads=32 build=70.466s search=0.263s qps=3809.4 avg=0.263ms p50=1.640ms p95=2.335ms p99=2.644ms recall=0.9541
+[hnsw M=32 efC=200 efS=384 metric=l2] N=100000 d=96 topk=10 nq=1000 threads=32 build=78.457s search=0.462s qps=2163.1 avg=0.462ms p50=2.562ms p95=4.074ms p99=25.420ms recall=0.9763
+[hnsw M=32 efC=200 efS=512 metric=l2] N=100000 d=96 topk=10 nq=1000 threads=32 build=66.344s search=0.609s qps=1643.3 avg=0.609ms p50=3.349ms p95=4.350ms p99=30.453ms recall=0.9861
+[hnsw M=32 efC=200 efS=640 metric=l2] N=100000 d=96 topk=10 nq=1000 threads=32 build=57.305s search=0.689s qps=1452.2 avg=0.689ms p50=4.283ms p95=11.093ms p99=16.389ms recall=0.9900
+[hnsw M=32 efC=200 efS=768 metric=l2] N=100000 d=96 topk=10 nq=1000 threads=32 build=69.965s search=0.843s qps=1186.5 avg=0.843ms p50=4.864ms p95=6.713ms p99=23.641ms recall=0.9926
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=100000 d=96 topk=10 nq=1000 threads=32 build=0.013s search=1.388s qps=720.6 avg=1.388ms p50=5.490ms p95=6.477ms p99=20.417ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=100000 d=96 topk=10 nq=1000 threads=32 build=62.142s search=0.078s qps=12852.3 avg=0.078ms p50=0.467ms p95=0.781ms p99=17.472ms recall=0.7243
+[hnsw M=32 efC=200 efS=128 metric=l2] N=100000 d=96 topk=10 nq=1000 threads=32 build=79.614s search=0.136s qps=7358.3 avg=0.136ms p50=0.998ms p95=1.285ms p99=10.228ms recall=0.8667
+[hnsw M=32 efC=200 efS=256 metric=l2] N=100000 d=96 topk=10 nq=1000 threads=32 build=61.150s search=0.278s qps=3594.3 avg=0.278ms p50=1.569ms p95=2.521ms p99=25.278ms recall=0.9533
+[hnsw M=32 efC=200 efS=384 metric=l2] N=100000 d=96 topk=10 nq=1000 threads=32 build=64.384s search=0.436s qps=2293.4 avg=0.436ms p50=2.690ms p95=3.439ms p99=3.830ms recall=0.9776
+[hnsw M=32 efC=200 efS=512 metric=l2] N=100000 d=96 topk=10 nq=1000 threads=32 build=62.019s search=0.539s qps=1856.7 avg=0.539ms p50=3.193ms p95=5.211ms p99=14.355ms recall=0.9870
+[hnsw M=32 efC=200 efS=640 metric=l2] N=100000 d=96 topk=10 nq=1000 threads=32 build=66.261s search=0.797s qps=1254.4 avg=0.797ms p50=4.106ms p95=5.751ms p99=6.158ms recall=0.9914
+[hnsw M=32 efC=200 efS=768 metric=l2] N=100000 d=96 topk=10 nq=1000 threads=32 build=57.160s search=0.885s qps=1130.0 avg=0.885ms p50=4.953ms p95=7.090ms p99=15.888ms recall=0.9935
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=2500 d=128 topk=10 nq=1000 threads=32 build=0.000s search=0.120s qps=8358.8 avg=0.120ms p50=0.147ms p95=0.156ms p99=8.324ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=2500 d=128 topk=10 nq=1000 threads=32 build=0.527s search=0.055s qps=18300.7 avg=0.055ms p50=0.183ms p95=0.228ms p99=15.544ms recall=0.9852
+[hnsw M=32 efC=200 efS=128 metric=l2] N=2500 d=128 topk=10 nq=1000 threads=32 build=0.444s search=0.072s qps=13845.0 avg=0.072ms p50=0.296ms p95=0.413ms p99=20.539ms recall=0.9987
+[hnsw M=32 efC=200 efS=256 metric=l2] N=2500 d=128 topk=10 nq=1000 threads=32 build=0.296s search=0.102s qps=9843.7 avg=0.102ms p50=0.518ms p95=2.908ms p99=9.377ms recall=1.0000
+[hnsw M=32 efC=200 efS=384 metric=l2] N=2500 d=128 topk=10 nq=1000 threads=32 build=0.285s search=0.144s qps=6920.6 avg=0.144ms p50=0.784ms p95=0.844ms p99=3.720ms recall=1.0000
+[hnsw M=32 efC=200 efS=512 metric=l2] N=2500 d=128 topk=10 nq=1000 threads=32 build=0.335s search=0.197s qps=5087.3 avg=0.197ms p50=0.815ms p95=1.216ms p99=22.314ms recall=1.0000
+[hnsw M=32 efC=200 efS=640 metric=l2] N=2500 d=128 topk=10 nq=1000 threads=32 build=0.251s search=0.253s qps=3956.7 avg=0.253ms p50=1.100ms p95=1.638ms p99=22.235ms recall=1.0000
+[hnsw M=32 efC=200 efS=768 metric=l2] N=2500 d=128 topk=10 nq=1000 threads=32 build=0.259s search=0.327s qps=3061.6 avg=0.327ms p50=1.447ms p95=2.170ms p99=22.053ms recall=1.0000
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=2500 d=128 topk=10 nq=1000 threads=32 build=0.000s search=0.038s qps=26106.4 avg=0.038ms p50=0.145ms p95=0.153ms p99=0.156ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=2500 d=128 topk=10 nq=1000 threads=32 build=0.307s search=0.037s qps=26774.7 avg=0.037ms p50=0.183ms p95=0.212ms p99=21.321ms recall=0.9861
+[hnsw M=32 efC=200 efS=128 metric=l2] N=2500 d=128 topk=10 nq=1000 threads=32 build=0.359s search=0.071s qps=14011.2 avg=0.071ms p50=0.297ms p95=0.370ms p99=9.128ms recall=0.9986
+[hnsw M=32 efC=200 efS=256 metric=l2] N=2500 d=128 topk=10 nq=1000 threads=32 build=0.334s search=0.100s qps=9982.5 avg=0.100ms p50=0.514ms p95=0.535ms p99=0.989ms recall=1.0000
+[hnsw M=32 efC=200 efS=384 metric=l2] N=2500 d=128 topk=10 nq=1000 threads=32 build=0.308s search=0.126s qps=7943.9 avg=0.126ms p50=0.571ms p95=1.016ms p99=24.199ms recall=0.9999
+[hnsw M=32 efC=200 efS=512 metric=l2] N=2500 d=128 topk=10 nq=1000 threads=32 build=0.357s search=0.208s qps=4807.0 avg=0.208ms p50=0.810ms p95=1.314ms p99=25.766ms recall=1.0000
+[hnsw M=32 efC=200 efS=640 metric=l2] N=2500 d=128 topk=10 nq=1000 threads=32 build=0.325s search=0.303s qps=3296.7 avg=0.303ms p50=1.104ms p95=1.803ms p99=23.819ms recall=0.9999
+[hnsw M=32 efC=200 efS=768 metric=l2] N=2500 d=128 topk=10 nq=1000 threads=32 build=0.362s search=0.330s qps=3034.9 avg=0.330ms p50=1.451ms p95=2.183ms p99=10.893ms recall=1.0000
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=5000 d=128 topk=10 nq=1000 threads=32 build=0.001s search=0.115s qps=8667.5 avg=0.115ms p50=0.278ms p95=0.382ms p99=9.175ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=5000 d=128 topk=10 nq=1000 threads=32 build=1.058s search=0.045s qps=22280.1 avg=0.045ms p50=0.249ms p95=7.549ms p99=12.491ms recall=0.9620
+[hnsw M=32 efC=200 efS=128 metric=l2] N=5000 d=128 topk=10 nq=1000 threads=32 build=0.889s search=0.080s qps=12539.7 avg=0.080ms p50=0.398ms p95=0.523ms p99=9.264ms recall=0.9946
+[hnsw M=32 efC=200 efS=256 metric=l2] N=5000 d=128 topk=10 nq=1000 threads=32 build=0.864s search=0.117s qps=8567.6 avg=0.117ms p50=0.677ms p95=0.766ms p99=9.857ms recall=0.9993
+[hnsw M=32 efC=200 efS=384 metric=l2] N=5000 d=128 topk=10 nq=1000 threads=32 build=0.880s search=0.158s qps=6314.5 avg=0.158ms p50=0.719ms p95=4.779ms p99=19.421ms recall=0.9999
+[hnsw M=32 efC=200 efS=512 metric=l2] N=5000 d=128 topk=10 nq=1000 threads=32 build=0.901s search=0.220s qps=4549.6 avg=0.220ms p50=1.022ms p95=5.636ms p99=10.056ms recall=1.0000
+[hnsw M=32 efC=200 efS=640 metric=l2] N=5000 d=128 topk=10 nq=1000 threads=32 build=0.955s search=0.296s qps=3383.2 avg=0.296ms p50=1.316ms p95=2.508ms p99=24.166ms recall=1.0000
+[hnsw M=32 efC=200 efS=768 metric=l2] N=5000 d=128 topk=10 nq=1000 threads=32 build=0.987s search=0.372s qps=2685.8 avg=0.372ms p50=1.683ms p95=2.703ms p99=19.348ms recall=1.0000
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=5000 d=128 topk=10 nq=1000 threads=32 build=0.001s search=0.099s qps=10097.5 avg=0.099ms p50=0.278ms p95=0.288ms p99=0.291ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=5000 d=128 topk=10 nq=1000 threads=32 build=0.976s search=0.070s qps=14222.8 avg=0.070ms p50=0.243ms p95=0.401ms p99=21.143ms recall=0.9633
+[hnsw M=32 efC=200 efS=128 metric=l2] N=5000 d=128 topk=10 nq=1000 threads=32 build=0.990s search=0.075s qps=13252.1 avg=0.075ms p50=0.395ms p95=0.560ms p99=21.733ms recall=0.9942
+[hnsw M=32 efC=200 efS=256 metric=l2] N=5000 d=128 topk=10 nq=1000 threads=32 build=0.965s search=0.102s qps=9787.0 avg=0.102ms p50=0.484ms p95=0.839ms p99=23.244ms recall=0.9991
+[hnsw M=32 efC=200 efS=384 metric=l2] N=5000 d=128 topk=10 nq=1000 threads=32 build=0.984s search=0.145s qps=6880.0 avg=0.145ms p50=0.713ms p95=1.369ms p99=25.196ms recall=0.9998
+[hnsw M=32 efC=200 efS=512 metric=l2] N=5000 d=128 topk=10 nq=1000 threads=32 build=0.848s search=0.225s qps=4440.4 avg=0.225ms p50=0.981ms p95=1.624ms p99=20.520ms recall=1.0000
+[hnsw M=32 efC=200 efS=640 metric=l2] N=5000 d=128 topk=10 nq=1000 threads=32 build=0.819s search=0.300s qps=3332.9 avg=0.300ms p50=1.315ms p95=1.833ms p99=2.258ms recall=1.0000
+[hnsw M=32 efC=200 efS=768 metric=l2] N=5000 d=128 topk=10 nq=1000 threads=32 build=0.945s search=0.372s qps=2686.9 avg=0.372ms p50=1.669ms p95=1.769ms p99=26.519ms recall=1.0000
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=7500 d=128 topk=10 nq=1000 threads=32 build=0.001s search=0.112s qps=8936.2 avg=0.112ms p50=0.418ms p95=0.877ms p99=9.242ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=7500 d=128 topk=10 nq=1000 threads=32 build=1.955s search=0.052s qps=19176.4 avg=0.052ms p50=0.271ms p95=0.397ms p99=0.752ms recall=0.9400
+[hnsw M=32 efC=200 efS=128 metric=l2] N=7500 d=128 topk=10 nq=1000 threads=32 build=1.424s search=0.077s qps=12912.7 avg=0.077ms p50=0.354ms p95=2.071ms p99=19.297ms recall=0.9878
+[hnsw M=32 efC=200 efS=256 metric=l2] N=7500 d=128 topk=10 nq=1000 threads=32 build=1.352s search=0.117s qps=8546.8 avg=0.117ms p50=0.575ms p95=1.057ms p99=21.584ms recall=0.9984
+[hnsw M=32 efC=200 efS=384 metric=l2] N=7500 d=128 topk=10 nq=1000 threads=32 build=1.518s search=0.161s qps=6210.0 avg=0.161ms p50=0.855ms p95=1.488ms p99=17.892ms recall=0.9995
+[hnsw M=32 efC=200 efS=512 metric=l2] N=7500 d=128 topk=10 nq=1000 threads=32 build=1.277s search=0.251s qps=3980.0 avg=0.251ms p50=1.154ms p95=6.700ms p99=10.165ms recall=0.9995
+[hnsw M=32 efC=200 efS=640 metric=l2] N=7500 d=128 topk=10 nq=1000 threads=32 build=1.452s search=0.308s qps=3244.8 avg=0.308ms p50=1.460ms p95=2.160ms p99=24.901ms recall=0.9998
+[hnsw M=32 efC=200 efS=768 metric=l2] N=7500 d=128 topk=10 nq=1000 threads=32 build=1.822s search=0.408s qps=2451.7 avg=0.408ms p50=1.848ms p95=3.276ms p99=17.771ms recall=0.9999
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=7500 d=128 topk=10 nq=1000 threads=32 build=0.001s search=0.139s qps=7219.4 avg=0.139ms p50=0.409ms p95=0.417ms p99=0.466ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=7500 d=128 topk=10 nq=1000 threads=32 build=2.733s search=0.084s qps=11972.6 avg=0.084ms p50=0.258ms p95=0.493ms p99=25.957ms recall=0.9435
+[hnsw M=32 efC=200 efS=128 metric=l2] N=7500 d=128 topk=10 nq=1000 threads=32 build=1.625s search=0.080s qps=12454.4 avg=0.080ms p50=0.453ms p95=0.468ms p99=0.510ms recall=0.9891
+[hnsw M=32 efC=200 efS=256 metric=l2] N=7500 d=128 topk=10 nq=1000 threads=32 build=1.274s search=0.131s qps=7662.3 avg=0.131ms p50=0.784ms p95=0.812ms p99=0.886ms recall=0.9986
+[hnsw M=32 efC=200 efS=384 metric=l2] N=7500 d=128 topk=10 nq=1000 threads=32 build=1.821s search=0.180s qps=5564.4 avg=0.180ms p50=0.849ms p95=3.095ms p99=10.120ms recall=0.9991
+[hnsw M=32 efC=200 efS=512 metric=l2] N=7500 d=128 topk=10 nq=1000 threads=32 build=1.589s search=0.253s qps=3948.0 avg=0.253ms p50=1.120ms p95=1.699ms p99=23.708ms recall=0.9995
+[hnsw M=32 efC=200 efS=640 metric=l2] N=7500 d=128 topk=10 nq=1000 threads=32 build=1.799s search=0.334s qps=2995.9 avg=0.334ms p50=1.456ms p95=2.608ms p99=10.875ms recall=0.9998
+[hnsw M=32 efC=200 efS=768 metric=l2] N=7500 d=128 topk=10 nq=1000 threads=32 build=1.242s search=0.411s qps=2432.1 avg=0.411ms p50=1.833ms p95=3.886ms p99=11.502ms recall=0.9999
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=10000 d=128 topk=10 nq=1000 threads=32 build=0.002s search=0.150s qps=6653.9 avg=0.150ms p50=0.551ms p95=3.059ms p99=17.285ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=10000 d=128 topk=10 nq=1000 threads=32 build=3.718s search=0.060s qps=16646.1 avg=0.060ms p50=0.339ms p95=3.181ms p99=20.044ms recall=0.9215
+[hnsw M=32 efC=200 efS=128 metric=l2] N=10000 d=128 topk=10 nq=1000 threads=32 build=3.275s search=0.077s qps=13046.1 avg=0.077ms p50=0.371ms p95=0.831ms p99=22.882ms recall=0.9847
+[hnsw M=32 efC=200 efS=256 metric=l2] N=10000 d=128 topk=10 nq=1000 threads=32 build=2.339s search=0.130s qps=7662.9 avg=0.130ms p50=0.854ms p95=6.721ms p99=9.851ms recall=0.9976
+[hnsw M=32 efC=200 efS=384 metric=l2] N=10000 d=128 topk=10 nq=1000 threads=32 build=2.003s search=0.198s qps=5056.1 avg=0.198ms p50=0.920ms p95=1.997ms p99=14.471ms recall=0.9994
+[hnsw M=32 efC=200 efS=512 metric=l2] N=10000 d=128 topk=10 nq=1000 threads=32 build=2.674s search=0.281s qps=3557.2 avg=0.281ms p50=1.250ms p95=5.908ms p99=17.957ms recall=0.9993
+[hnsw M=32 efC=200 efS=640 metric=l2] N=10000 d=128 topk=10 nq=1000 threads=32 build=1.652s search=0.359s qps=2788.6 avg=0.359ms p50=1.620ms p95=8.150ms p99=24.115ms recall=0.9998
+[hnsw M=32 efC=200 efS=768 metric=l2] N=10000 d=128 topk=10 nq=1000 threads=32 build=1.961s search=0.441s qps=2269.4 avg=0.441ms p50=2.023ms p95=3.065ms p99=26.863ms recall=0.9998
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=10000 d=128 topk=10 nq=1000 threads=32 build=0.002s search=0.162s qps=6181.5 avg=0.162ms p50=0.427ms p95=0.771ms p99=16.935ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=10000 d=128 topk=10 nq=1000 threads=32 build=1.978s search=0.064s qps=15513.9 avg=0.064ms p50=0.291ms p95=0.385ms p99=9.016ms recall=0.9224
+[hnsw M=32 efC=200 efS=128 metric=l2] N=10000 d=128 topk=10 nq=1000 threads=32 build=3.603s search=0.086s qps=11581.3 avg=0.086ms p50=0.532ms p95=4.080ms p99=8.107ms recall=0.9823
+[hnsw M=32 efC=200 efS=256 metric=l2] N=10000 d=128 topk=10 nq=1000 threads=32 build=2.207s search=0.127s qps=7857.3 avg=0.127ms p50=0.685ms p95=1.605ms p99=21.745ms recall=0.9971
+[hnsw M=32 efC=200 efS=384 metric=l2] N=10000 d=128 topk=10 nq=1000 threads=32 build=1.908s search=0.187s qps=5335.6 avg=0.187ms p50=0.932ms p95=4.676ms p99=14.477ms recall=0.9992
+[hnsw M=32 efC=200 efS=512 metric=l2] N=10000 d=128 topk=10 nq=1000 threads=32 build=2.889s search=0.267s qps=3751.5 avg=0.267ms p50=1.246ms p95=7.643ms p99=11.859ms recall=0.9995
+[hnsw M=32 efC=200 efS=640 metric=l2] N=10000 d=128 topk=10 nq=1000 threads=32 build=2.208s search=0.363s qps=2754.5 avg=0.363ms p50=1.638ms p95=2.261ms p99=23.621ms recall=0.9995
+[hnsw M=32 efC=200 efS=768 metric=l2] N=10000 d=128 topk=10 nq=1000 threads=32 build=2.106s search=0.458s qps=2181.3 avg=0.458ms p50=2.020ms p95=2.943ms p99=27.151ms recall=0.9998
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=25000 d=128 topk=10 nq=1000 threads=32 build=0.004s search=0.370s qps=2700.6 avg=0.370ms p50=1.083ms p95=2.177ms p99=21.827ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=25000 d=128 topk=10 nq=1000 threads=32 build=5.950s search=0.071s qps=14134.1 avg=0.071ms p50=0.501ms p95=1.236ms p99=9.203ms recall=0.8450
+[hnsw M=32 efC=200 efS=128 metric=l2] N=25000 d=128 topk=10 nq=1000 threads=32 build=10.770s search=0.092s qps=10818.4 avg=0.092ms p50=0.675ms p95=1.476ms p99=9.338ms recall=0.9463
+[hnsw M=32 efC=200 efS=256 metric=l2] N=25000 d=128 topk=10 nq=1000 threads=32 build=10.935s search=0.177s qps=5653.3 avg=0.177ms p50=0.958ms p95=2.319ms p99=25.487ms recall=0.9867
+[hnsw M=32 efC=200 efS=384 metric=l2] N=25000 d=128 topk=10 nq=1000 threads=32 build=10.405s search=0.271s qps=3690.4 avg=0.271ms p50=1.411ms p95=6.337ms p99=11.429ms recall=0.9939
+[hnsw M=32 efC=200 efS=512 metric=l2] N=25000 d=128 topk=10 nq=1000 threads=32 build=11.000s search=0.340s qps=2941.6 avg=0.340ms p50=1.750ms p95=3.496ms p99=28.788ms recall=0.9978
+[hnsw M=32 efC=200 efS=640 metric=l2] N=25000 d=128 topk=10 nq=1000 threads=32 build=5.563s search=0.465s qps=2149.1 avg=0.465ms p50=2.593ms p95=8.528ms p99=14.409ms recall=0.9992
+[hnsw M=32 efC=200 efS=768 metric=l2] N=25000 d=128 topk=10 nq=1000 threads=32 build=10.260s search=0.595s qps=1681.8 avg=0.595ms p50=4.198ms p95=5.172ms p99=25.780ms recall=0.9985
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=25000 d=128 topk=10 nq=1000 threads=32 build=0.004s search=0.312s qps=3204.5 avg=0.312ms p50=1.391ms p95=1.441ms p99=1.858ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=25000 d=128 topk=10 nq=1000 threads=32 build=13.121s search=0.061s qps=16428.2 avg=0.061ms p50=0.450ms p95=5.655ms p99=9.252ms recall=0.8391
+[hnsw M=32 efC=200 efS=128 metric=l2] N=25000 d=128 topk=10 nq=1000 threads=32 build=11.754s search=0.102s qps=9807.6 avg=0.102ms p50=0.683ms p95=0.942ms p99=16.384ms recall=0.9460
+[hnsw M=32 efC=200 efS=256 metric=l2] N=25000 d=128 topk=10 nq=1000 threads=32 build=12.428s search=0.187s qps=5354.6 avg=0.187ms p50=0.954ms p95=4.742ms p99=12.367ms recall=0.9871
+[hnsw M=32 efC=200 efS=384 metric=l2] N=25000 d=128 topk=10 nq=1000 threads=32 build=14.568s search=0.277s qps=3614.4 avg=0.277ms p50=1.537ms p95=2.137ms p99=2.694ms recall=0.9950
+[hnsw M=32 efC=200 efS=512 metric=l2] N=25000 d=128 topk=10 nq=1000 threads=32 build=10.318s search=0.470s qps=2126.3 avg=0.470ms p50=1.923ms p95=3.747ms p99=23.642ms recall=0.9973
+[hnsw M=32 efC=200 efS=640 metric=l2] N=25000 d=128 topk=10 nq=1000 threads=32 build=12.365s search=0.538s qps=1857.9 avg=0.538ms p50=2.422ms p95=7.204ms p99=18.576ms recall=0.9985
+[hnsw M=32 efC=200 efS=768 metric=l2] N=25000 d=128 topk=10 nq=1000 threads=32 build=8.999s search=0.592s qps=1688.8 avg=0.592ms p50=2.810ms p95=9.643ms p99=14.588ms recall=0.9990
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=50000 d=128 topk=10 nq=1000 threads=32 build=0.009s search=0.632s qps=1583.2 avg=0.632ms p50=3.009ms p95=4.071ms p99=24.223ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=50000 d=128 topk=10 nq=1000 threads=32 build=30.804s search=0.076s qps=13192.0 avg=0.076ms p50=0.433ms p95=0.928ms p99=21.521ms recall=0.7604
+[hnsw M=32 efC=200 efS=128 metric=l2] N=50000 d=128 topk=10 nq=1000 threads=32 build=31.267s search=0.151s qps=6615.0 avg=0.151ms p50=0.837ms p95=1.754ms p99=27.740ms recall=0.8935
+[hnsw M=32 efC=200 efS=256 metric=l2] N=50000 d=128 topk=10 nq=1000 threads=32 build=26.736s search=0.367s qps=2722.4 avg=0.367ms p50=1.752ms p95=2.524ms p99=10.868ms recall=0.9607
+[hnsw M=32 efC=200 efS=384 metric=l2] N=50000 d=128 topk=10 nq=1000 threads=32 build=30.311s search=0.391s qps=2557.0 avg=0.391ms p50=2.396ms p95=3.368ms p99=31.047ms recall=0.9824
+[hnsw M=32 efC=200 efS=512 metric=l2] N=50000 d=128 topk=10 nq=1000 threads=32 build=29.408s search=0.669s qps=1494.7 avg=0.669ms p50=2.887ms p95=4.206ms p99=14.757ms recall=0.9898
+[hnsw M=32 efC=200 efS=640 metric=l2] N=50000 d=128 topk=10 nq=1000 threads=32 build=25.999s search=0.671s qps=1490.8 avg=0.671ms p50=3.594ms p95=4.765ms p99=36.886ms recall=0.9946
+[hnsw M=32 efC=200 efS=768 metric=l2] N=50000 d=128 topk=10 nq=1000 threads=32 build=34.550s search=0.886s qps=1128.4 avg=0.886ms p50=4.814ms p95=6.329ms p99=23.028ms recall=0.9957
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=50000 d=128 topk=10 nq=1000 threads=32 build=0.008s search=0.655s qps=1527.2 avg=0.655ms p50=3.292ms p95=3.773ms p99=4.210ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=50000 d=128 topk=10 nq=1000 threads=32 build=26.349s search=0.092s qps=10879.5 avg=0.092ms p50=0.507ms p95=1.063ms p99=20.333ms recall=0.7658
+[hnsw M=32 efC=200 efS=128 metric=l2] N=50000 d=128 topk=10 nq=1000 threads=32 build=14.238s search=0.134s qps=7469.9 avg=0.134ms p50=0.860ms p95=3.425ms p99=9.896ms recall=0.9026
+[hnsw M=32 efC=200 efS=256 metric=l2] N=50000 d=128 topk=10 nq=1000 threads=32 build=13.858s search=0.230s qps=4355.3 avg=0.230ms p50=1.439ms p95=2.824ms p99=18.632ms recall=0.9683
+[hnsw M=32 efC=200 efS=384 metric=l2] N=50000 d=128 topk=10 nq=1000 threads=32 build=32.753s search=0.397s qps=2518.0 avg=0.397ms p50=2.502ms p95=4.619ms p99=12.975ms recall=0.9833
+[hnsw M=32 efC=200 efS=512 metric=l2] N=50000 d=128 topk=10 nq=1000 threads=32 build=30.145s search=0.548s qps=1826.3 avg=0.548ms p50=3.087ms p95=10.108ms p99=13.384ms recall=0.9906
+[hnsw M=32 efC=200 efS=640 metric=l2] N=50000 d=128 topk=10 nq=1000 threads=32 build=31.456s search=0.651s qps=1535.2 avg=0.651ms p50=3.793ms p95=10.521ms p99=14.834ms recall=0.9940
+[hnsw M=32 efC=200 efS=768 metric=l2] N=50000 d=128 topk=10 nq=1000 threads=32 build=35.566s search=0.738s qps=1355.7 avg=0.738ms p50=4.304ms p95=4.956ms p99=34.014ms recall=0.9961
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=100000 d=128 topk=10 nq=1000 threads=32 build=0.017s search=1.144s qps=873.8 avg=1.144ms p50=7.341ms p95=8.195ms p99=8.319ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=100000 d=128 topk=10 nq=1000 threads=32 build=88.866s search=0.169s qps=5914.6 avg=0.169ms p50=0.613ms p95=1.079ms p99=40.363ms recall=0.6781
+[hnsw M=32 efC=200 efS=128 metric=l2] N=100000 d=128 topk=10 nq=1000 threads=32 build=81.377s search=0.199s qps=5029.4 avg=0.199ms p50=1.154ms p95=1.902ms p99=16.370ms recall=0.8296
+[hnsw M=32 efC=200 efS=256 metric=l2] N=100000 d=128 topk=10 nq=1000 threads=32 build=83.244s search=0.343s qps=2918.6 avg=0.343ms p50=2.380ms p95=3.439ms p99=16.949ms recall=0.9303
+[hnsw M=32 efC=200 efS=384 metric=l2] N=100000 d=128 topk=10 nq=1000 threads=32 build=84.411s search=0.642s qps=1557.8 avg=0.642ms p50=3.324ms p95=3.812ms p99=36.254ms recall=0.9607
+[hnsw M=32 efC=200 efS=512 metric=l2] N=100000 d=128 topk=10 nq=1000 threads=32 build=85.755s search=0.768s qps=1301.8 avg=0.768ms p50=4.323ms p95=4.642ms p99=27.759ms recall=0.9746
+[hnsw M=32 efC=200 efS=640 metric=l2] N=100000 d=128 topk=10 nq=1000 threads=32 build=95.015s search=0.999s qps=1001.1 avg=0.999ms p50=5.399ms p95=5.701ms p99=51.059ms recall=0.9813
+[hnsw M=32 efC=200 efS=768 metric=l2] N=100000 d=128 topk=10 nq=1000 threads=32 build=74.599s search=1.151s qps=868.8 avg=1.151ms p50=6.338ms p95=8.628ms p99=19.242ms recall=0.9860
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=100000 d=128 topk=10 nq=1000 threads=32 build=0.039s search=1.090s qps=917.4 avg=1.090ms p50=7.291ms p95=8.193ms p99=25.083ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=100000 d=128 topk=10 nq=1000 threads=32 build=80.887s search=0.112s qps=8922.2 avg=0.112ms p50=0.646ms p95=6.855ms p99=8.890ms recall=0.6769
+[hnsw M=32 efC=200 efS=128 metric=l2] N=100000 d=128 topk=10 nq=1000 threads=32 build=78.997s search=0.213s qps=4686.5 avg=0.213ms p50=1.107ms p95=2.272ms p99=10.368ms recall=0.8262
+[hnsw M=32 efC=200 efS=256 metric=l2] N=100000 d=128 topk=10 nq=1000 threads=32 build=80.228s search=0.365s qps=2739.4 avg=0.365ms p50=2.120ms p95=3.213ms p99=11.901ms recall=0.9244
+[hnsw M=32 efC=200 efS=384 metric=l2] N=100000 d=128 topk=10 nq=1000 threads=32 build=82.728s search=0.600s qps=1667.9 avg=0.600ms p50=3.033ms p95=8.696ms p99=12.920ms recall=0.9567
+[hnsw M=32 efC=200 efS=512 metric=l2] N=100000 d=128 topk=10 nq=1000 threads=32 build=89.617s search=0.698s qps=1433.0 avg=0.698ms p50=4.148ms p95=5.987ms p99=14.737ms recall=0.9733
+[hnsw M=32 efC=200 efS=640 metric=l2] N=100000 d=128 topk=10 nq=1000 threads=32 build=78.787s search=0.936s qps=1068.9 avg=0.936ms p50=5.294ms p95=7.000ms p99=24.087ms recall=0.9821
+[hnsw M=32 efC=200 efS=768 metric=l2] N=100000 d=128 topk=10 nq=1000 threads=32 build=84.234s search=1.088s qps=918.8 avg=1.088ms p50=6.375ms p95=6.758ms p99=53.379ms recall=0.9862
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=2500 d=384 topk=10 nq=1000 threads=32 build=0.001s search=0.125s qps=7977.7 avg=0.125ms p50=0.407ms p95=0.635ms p99=9.387ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=2500 d=384 topk=10 nq=1000 threads=32 build=0.659s search=0.064s qps=15588.5 avg=0.064ms p50=0.304ms p95=0.365ms p99=8.999ms recall=0.9692
+[hnsw M=32 efC=200 efS=128 metric=l2] N=2500 d=384 topk=10 nq=1000 threads=32 build=0.651s search=0.077s qps=13039.5 avg=0.077ms p50=0.445ms p95=0.616ms p99=18.409ms recall=0.9949
+[hnsw M=32 efC=200 efS=256 metric=l2] N=2500 d=384 topk=10 nq=1000 threads=32 build=0.598s search=0.129s qps=7745.1 avg=0.129ms p50=0.629ms p95=0.850ms p99=18.111ms recall=0.9994
+[hnsw M=32 efC=200 efS=384 metric=l2] N=2500 d=384 topk=10 nq=1000 threads=32 build=0.914s search=0.214s qps=4680.6 avg=0.214ms p50=0.967ms p95=1.061ms p99=9.117ms recall=0.9998
+[hnsw M=32 efC=200 efS=512 metric=l2] N=2500 d=384 topk=10 nq=1000 threads=32 build=0.782s search=0.302s qps=3309.1 avg=0.302ms p50=0.979ms p95=1.773ms p99=20.765ms recall=0.9999
+[hnsw M=32 efC=200 efS=640 metric=l2] N=2500 d=384 topk=10 nq=1000 threads=32 build=0.645s search=0.363s qps=2751.4 avg=0.363ms p50=1.316ms p95=6.561ms p99=7.068ms recall=1.0000
+[hnsw M=32 efC=200 efS=768 metric=l2] N=2500 d=384 topk=10 nq=1000 threads=32 build=0.659s search=0.466s qps=2147.8 avg=0.466ms p50=1.658ms p95=2.262ms p99=10.660ms recall=1.0000
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=2500 d=384 topk=10 nq=1000 threads=32 build=0.001s search=0.046s qps=21891.4 avg=0.046ms p50=0.403ms p95=0.410ms p99=0.496ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=2500 d=384 topk=10 nq=1000 threads=32 build=0.785s search=0.059s qps=17022.9 avg=0.059ms p50=0.297ms p95=0.397ms p99=12.611ms recall=0.9714
+[hnsw M=32 efC=200 efS=128 metric=l2] N=2500 d=384 topk=10 nq=1000 threads=32 build=0.703s search=0.087s qps=11512.1 avg=0.087ms p50=0.432ms p95=0.602ms p99=17.296ms recall=0.9961
+[hnsw M=32 efC=200 efS=256 metric=l2] N=2500 d=384 topk=10 nq=1000 threads=32 build=0.855s search=0.121s qps=8252.8 avg=0.121ms p50=0.670ms p95=1.313ms p99=11.900ms recall=0.9995
+[hnsw M=32 efC=200 efS=384 metric=l2] N=2500 d=384 topk=10 nq=1000 threads=32 build=1.137s search=0.183s qps=5455.3 avg=0.183ms p50=0.961ms p95=1.001ms p99=7.344ms recall=0.9998
+[hnsw M=32 efC=200 efS=512 metric=l2] N=2500 d=384 topk=10 nq=1000 threads=32 build=0.774s search=0.304s qps=3287.3 avg=0.304ms p50=0.972ms p95=8.521ms p99=10.176ms recall=1.0000
+[hnsw M=32 efC=200 efS=640 metric=l2] N=2500 d=384 topk=10 nq=1000 threads=32 build=0.664s search=0.366s qps=2728.9 avg=0.366ms p50=1.270ms p95=2.548ms p99=25.301ms recall=1.0000
+[hnsw M=32 efC=200 efS=768 metric=l2] N=2500 d=384 topk=10 nq=1000 threads=32 build=0.780s search=0.536s qps=1864.8 avg=0.536ms p50=1.594ms p95=2.469ms p99=26.725ms recall=1.0000
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=5000 d=384 topk=10 nq=1000 threads=32 build=0.002s search=0.105s qps=9558.5 avg=0.105ms p50=0.797ms p95=1.313ms p99=9.622ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=5000 d=384 topk=10 nq=1000 threads=32 build=1.559s search=0.081s qps=12393.6 avg=0.081ms p50=0.394ms p95=0.459ms p99=18.143ms recall=0.9338
+[hnsw M=32 efC=200 efS=128 metric=l2] N=5000 d=384 topk=10 nq=1000 threads=32 build=1.421s search=0.109s qps=9189.8 avg=0.109ms p50=0.615ms p95=2.758ms p99=9.366ms recall=0.9863
+[hnsw M=32 efC=200 efS=256 metric=l2] N=5000 d=384 topk=10 nq=1000 threads=32 build=1.905s search=0.181s qps=5517.3 avg=0.181ms p50=0.741ms p95=1.430ms p99=21.375ms recall=0.9981
+[hnsw M=32 efC=200 efS=384 metric=l2] N=5000 d=384 topk=10 nq=1000 threads=32 build=3.329s search=0.320s qps=3126.5 avg=0.320ms p50=0.993ms p95=1.590ms p99=22.387ms recall=0.9994
+[hnsw M=32 efC=200 efS=512 metric=l2] N=5000 d=384 topk=10 nq=1000 threads=32 build=1.546s search=0.357s qps=2798.8 avg=0.357ms p50=1.263ms p95=1.784ms p99=29.137ms recall=0.9993
+[hnsw M=32 efC=200 efS=640 metric=l2] N=5000 d=384 topk=10 nq=1000 threads=32 build=2.102s search=0.372s qps=2686.4 avg=0.372ms p50=1.612ms p95=2.689ms p99=22.952ms recall=1.0000
+[hnsw M=32 efC=200 efS=768 metric=l2] N=5000 d=384 topk=10 nq=1000 threads=32 build=1.376s search=0.528s qps=1894.3 avg=0.528ms p50=2.007ms p95=10.252ms p99=12.911ms recall=0.9999
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=5000 d=384 topk=10 nq=1000 threads=32 build=0.002s search=0.112s qps=8950.6 avg=0.112ms p50=0.803ms p95=0.807ms p99=0.921ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=5000 d=384 topk=10 nq=1000 threads=32 build=1.633s search=0.093s qps=10742.4 avg=0.093ms p50=0.403ms p95=0.635ms p99=9.477ms recall=0.9267
+[hnsw M=32 efC=200 efS=128 metric=l2] N=5000 d=384 topk=10 nq=1000 threads=32 build=2.217s search=0.102s qps=9775.4 avg=0.102ms p50=0.607ms p95=0.624ms p99=0.653ms recall=0.9853
+[hnsw M=32 efC=200 efS=256 metric=l2] N=5000 d=384 topk=10 nq=1000 threads=32 build=2.155s search=0.176s qps=5673.5 avg=0.176ms p50=0.714ms p95=1.201ms p99=21.144ms recall=0.9977
+[hnsw M=32 efC=200 efS=384 metric=l2] N=5000 d=384 topk=10 nq=1000 threads=32 build=2.077s search=0.287s qps=3486.1 avg=0.287ms p50=0.977ms p95=9.644ms p99=10.223ms recall=0.9991
+[hnsw M=32 efC=200 efS=512 metric=l2] N=5000 d=384 topk=10 nq=1000 threads=32 build=1.532s search=0.344s qps=2907.9 avg=0.344ms p50=1.311ms p95=2.401ms p99=15.348ms recall=0.9995
+[hnsw M=32 efC=200 efS=640 metric=l2] N=5000 d=384 topk=10 nq=1000 threads=32 build=1.691s search=0.436s qps=2294.8 avg=0.436ms p50=1.597ms p95=5.666ms p99=11.271ms recall=0.9999
+[hnsw M=32 efC=200 efS=768 metric=l2] N=5000 d=384 topk=10 nq=1000 threads=32 build=2.381s search=0.560s qps=1785.4 avg=0.560ms p50=1.981ms p95=3.150ms p99=19.347ms recall=0.9996
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=7500 d=384 topk=10 nq=1000 threads=32 build=0.004s search=0.269s qps=3722.0 avg=0.269ms p50=1.081ms p95=3.561ms p99=18.833ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=7500 d=384 topk=10 nq=1000 threads=32 build=2.557s search=0.085s qps=11764.8 avg=0.085ms p50=0.469ms p95=1.152ms p99=9.409ms recall=0.8973
+[hnsw M=32 efC=200 efS=128 metric=l2] N=7500 d=384 topk=10 nq=1000 threads=32 build=3.893s search=0.122s qps=8187.2 avg=0.122ms p50=0.743ms p95=0.863ms p99=7.298ms recall=0.9749
+[hnsw M=32 efC=200 efS=256 metric=l2] N=7500 d=384 topk=10 nq=1000 threads=32 build=4.385s search=0.212s qps=4710.7 avg=0.212ms p50=0.898ms p95=1.363ms p99=23.829ms recall=0.9941
+[hnsw M=32 efC=200 efS=384 metric=l2] N=7500 d=384 topk=10 nq=1000 threads=32 build=2.851s search=0.287s qps=3488.3 avg=0.287ms p50=1.223ms p95=1.870ms p99=20.295ms recall=0.9982
+[hnsw M=32 efC=200 efS=512 metric=l2] N=7500 d=384 topk=10 nq=1000 threads=32 build=2.646s search=0.384s qps=2604.5 avg=0.384ms p50=1.568ms p95=3.022ms p99=17.105ms recall=0.9993
+[hnsw M=32 efC=200 efS=640 metric=l2] N=7500 d=384 topk=10 nq=1000 threads=32 build=2.629s search=0.492s qps=2034.2 avg=0.492ms p50=1.963ms p95=2.873ms p99=11.043ms recall=0.9996
+[hnsw M=32 efC=200 efS=768 metric=l2] N=7500 d=384 topk=10 nq=1000 threads=32 build=3.791s search=0.577s qps=1733.8 avg=0.577ms p50=2.457ms p95=3.092ms p99=26.443ms recall=0.9998
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=7500 d=384 topk=10 nq=1000 threads=32 build=0.004s search=0.179s qps=5595.3 avg=0.179ms p50=1.095ms p95=1.859ms p99=18.141ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=7500 d=384 topk=10 nq=1000 threads=32 build=4.877s search=0.086s qps=11621.5 avg=0.086ms p50=0.462ms p95=0.504ms p99=0.648ms recall=0.8986
+[hnsw M=32 efC=200 efS=128 metric=l2] N=7500 d=384 topk=10 nq=1000 threads=32 build=3.046s search=0.129s qps=7733.4 avg=0.129ms p50=0.735ms p95=1.095ms p99=9.655ms recall=0.9730
+[hnsw M=32 efC=200 efS=256 metric=l2] N=7500 d=384 topk=10 nq=1000 threads=32 build=2.544s search=0.200s qps=4999.5 avg=0.200ms p50=0.910ms p95=1.690ms p99=10.267ms recall=0.9942
+[hnsw M=32 efC=200 efS=384 metric=l2] N=7500 d=384 topk=10 nq=1000 threads=32 build=2.577s search=0.307s qps=3255.7 avg=0.307ms p50=1.255ms p95=2.852ms p99=10.625ms recall=0.9987
+[hnsw M=32 efC=200 efS=512 metric=l2] N=7500 d=384 topk=10 nq=1000 threads=32 build=2.513s search=0.473s qps=2116.4 avg=0.473ms p50=1.491ms p95=6.808ms p99=20.683ms recall=0.9988
+[hnsw M=32 efC=200 efS=640 metric=l2] N=7500 d=384 topk=10 nq=1000 threads=32 build=2.728s search=0.526s qps=1902.0 avg=0.526ms p50=1.969ms p95=3.383ms p99=11.997ms recall=0.9995
+[hnsw M=32 efC=200 efS=768 metric=l2] N=7500 d=384 topk=10 nq=1000 threads=32 build=2.412s search=0.570s qps=1753.3 avg=0.570ms p50=2.421ms p95=3.421ms p99=21.833ms recall=0.9996
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=10000 d=384 topk=10 nq=1000 threads=32 build=0.005s search=0.163s qps=6144.2 avg=0.163ms p50=1.446ms p95=2.489ms p99=14.465ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=10000 d=384 topk=10 nq=1000 threads=32 build=8.156s search=0.087s qps=11539.2 avg=0.087ms p50=0.500ms p95=0.532ms p99=0.608ms recall=0.8653
+[hnsw M=32 efC=200 efS=128 metric=l2] N=10000 d=384 topk=10 nq=1000 threads=32 build=7.704s search=0.142s qps=7025.3 avg=0.142ms p50=0.678ms p95=2.099ms p99=26.101ms recall=0.9581
+[hnsw M=32 efC=200 efS=256 metric=l2] N=10000 d=384 topk=10 nq=1000 threads=32 build=3.764s search=0.292s qps=3427.1 avg=0.292ms p50=1.098ms p95=3.370ms p99=10.389ms recall=0.9912
+[hnsw M=32 efC=200 efS=384 metric=l2] N=10000 d=384 topk=10 nq=1000 threads=32 build=6.430s search=0.381s qps=2625.1 avg=0.381ms p50=1.430ms p95=2.079ms p99=2.790ms recall=0.9968
+[hnsw M=32 efC=200 efS=512 metric=l2] N=10000 d=384 topk=10 nq=1000 threads=32 build=3.784s search=0.428s qps=2335.1 avg=0.428ms p50=1.974ms p95=3.289ms p99=23.832ms recall=0.9986
+[hnsw M=32 efC=200 efS=640 metric=l2] N=10000 d=384 topk=10 nq=1000 threads=32 build=3.962s search=0.543s qps=1840.3 avg=0.543ms p50=2.313ms p95=4.052ms p99=12.236ms recall=0.9993
+[hnsw M=32 efC=200 efS=768 metric=l2] N=10000 d=384 topk=10 nq=1000 threads=32 build=6.532s search=0.636s qps=1572.1 avg=0.636ms p50=3.373ms p95=8.187ms p99=13.147ms recall=0.9998
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=10000 d=384 topk=10 nq=1000 threads=32 build=0.005s search=0.190s qps=5265.7 avg=0.190ms p50=1.687ms p95=2.591ms p99=20.369ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=10000 d=384 topk=10 nq=1000 threads=32 build=7.449s search=0.085s qps=11801.8 avg=0.085ms p50=0.537ms p95=5.949ms p99=9.434ms recall=0.8624
+[hnsw M=32 efC=200 efS=128 metric=l2] N=10000 d=384 topk=10 nq=1000 threads=32 build=6.473s search=0.146s qps=6834.9 avg=0.146ms p50=0.632ms p95=1.246ms p99=15.661ms recall=0.9594
+[hnsw M=32 efC=200 efS=256 metric=l2] N=10000 d=384 topk=10 nq=1000 threads=32 build=3.738s search=0.232s qps=4309.3 avg=0.232ms p50=1.054ms p95=5.147ms p99=15.248ms recall=0.9906
+[hnsw M=32 efC=200 efS=384 metric=l2] N=10000 d=384 topk=10 nq=1000 threads=32 build=3.785s search=0.335s qps=2984.0 avg=0.335ms p50=1.583ms p95=5.419ms p99=10.712ms recall=0.9962
+[hnsw M=32 efC=200 efS=512 metric=l2] N=10000 d=384 topk=10 nq=1000 threads=32 build=3.823s search=0.422s qps=2372.2 avg=0.422ms p50=1.842ms p95=3.083ms p99=19.164ms recall=0.9989
+[hnsw M=32 efC=200 efS=640 metric=l2] N=10000 d=384 topk=10 nq=1000 threads=32 build=3.671s search=0.561s qps=1781.9 avg=0.561ms p50=2.294ms p95=4.113ms p99=21.387ms recall=0.9995
+[hnsw M=32 efC=200 efS=768 metric=l2] N=10000 d=384 topk=10 nq=1000 threads=32 build=4.042s search=0.663s qps=1507.6 avg=0.663ms p50=2.824ms p95=4.620ms p99=21.550ms recall=0.9996
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=25000 d=384 topk=10 nq=1000 threads=32 build=0.012s search=0.541s qps=1846.8 avg=0.541ms p50=5.579ms p95=6.168ms p99=15.133ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=25000 d=384 topk=10 nq=1000 threads=32 build=14.600s search=0.129s qps=7734.3 avg=0.129ms p50=0.747ms p95=1.412ms p99=9.904ms recall=0.7459
+[hnsw M=32 efC=200 efS=128 metric=l2] N=25000 d=384 topk=10 nq=1000 threads=32 build=28.035s search=0.262s qps=3818.7 avg=0.262ms p50=1.268ms p95=6.157ms p99=10.649ms recall=0.8861
+[hnsw M=32 efC=200 efS=256 metric=l2] N=25000 d=384 topk=10 nq=1000 threads=32 build=25.266s search=0.394s qps=2535.2 avg=0.394ms p50=2.087ms p95=3.187ms p99=23.952ms recall=0.9632
+[hnsw M=32 efC=200 efS=384 metric=l2] N=25000 d=384 topk=10 nq=1000 threads=32 build=28.469s search=0.630s qps=1586.6 avg=0.630ms p50=2.874ms p95=3.496ms p99=26.826ms recall=0.9805
+[hnsw M=32 efC=200 efS=512 metric=l2] N=25000 d=384 topk=10 nq=1000 threads=32 build=26.828s search=0.729s qps=1372.2 avg=0.729ms p50=3.860ms p95=5.651ms p99=21.509ms recall=0.9886
+[hnsw M=32 efC=200 efS=640 metric=l2] N=25000 d=384 topk=10 nq=1000 threads=32 build=29.577s search=0.931s qps=1074.3 avg=0.931ms p50=4.298ms p95=5.690ms p99=29.254ms recall=0.9927
+[hnsw M=32 efC=200 efS=768 metric=l2] N=25000 d=384 topk=10 nq=1000 threads=32 build=27.373s search=1.193s qps=838.0 avg=1.193ms p50=5.324ms p95=7.319ms p99=7.814ms recall=0.9946
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=25000 d=384 topk=10 nq=1000 threads=32 build=0.012s search=0.398s qps=2515.6 avg=0.398ms p50=5.521ms p95=6.160ms p99=6.231ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=25000 d=384 topk=10 nq=1000 threads=32 build=25.288s search=0.132s qps=7593.5 avg=0.132ms p50=0.848ms p95=3.672ms p99=9.769ms recall=0.7538
+[hnsw M=32 efC=200 efS=128 metric=l2] N=25000 d=384 topk=10 nq=1000 threads=32 build=27.462s search=0.273s qps=3669.5 avg=0.273ms p50=1.164ms p95=1.670ms p99=24.754ms recall=0.8895
+[hnsw M=32 efC=200 efS=256 metric=l2] N=25000 d=384 topk=10 nq=1000 threads=32 build=29.888s search=0.400s qps=2499.1 avg=0.400ms p50=2.136ms p95=7.525ms p99=11.813ms recall=0.9625
+[hnsw M=32 efC=200 efS=384 metric=l2] N=25000 d=384 topk=10 nq=1000 threads=32 build=14.060s search=0.554s qps=1806.3 avg=0.554ms p50=3.084ms p95=4.136ms p99=4.748ms recall=0.9801
+[hnsw M=32 efC=200 efS=512 metric=l2] N=25000 d=384 topk=10 nq=1000 threads=32 build=26.289s search=0.957s qps=1044.5 avg=0.957ms p50=3.729ms p95=5.438ms p99=14.233ms recall=0.9885
+[hnsw M=32 efC=200 efS=640 metric=l2] N=25000 d=384 topk=10 nq=1000 threads=32 build=23.984s search=1.035s qps=965.8 avg=1.035ms p50=4.718ms p95=6.233ms p99=15.148ms recall=0.9927
+[hnsw M=32 efC=200 efS=768 metric=l2] N=25000 d=384 topk=10 nq=1000 threads=32 build=25.055s search=1.248s qps=801.5 avg=1.248ms p50=5.704ms p95=7.216ms p99=7.471ms recall=0.9951
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=50000 d=384 topk=10 nq=1000 threads=32 build=0.057s search=1.094s qps=913.9 avg=1.094ms p50=11.360ms p95=11.562ms p99=52.434ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=50000 d=384 topk=10 nq=1000 threads=32 build=73.835s search=0.156s qps=6404.4 avg=0.156ms p50=1.079ms p95=1.231ms p99=7.256ms recall=0.6472
+[hnsw M=32 efC=200 efS=128 metric=l2] N=50000 d=384 topk=10 nq=1000 threads=32 build=41.186s search=0.321s qps=3111.2 avg=0.321ms p50=1.685ms p95=2.564ms p99=26.390ms recall=0.8039
+[hnsw M=32 efC=200 efS=256 metric=l2] N=50000 d=384 topk=10 nq=1000 threads=32 build=76.513s search=0.602s qps=1661.7 avg=0.602ms p50=3.288ms p95=7.073ms p99=12.899ms recall=0.9099
+[hnsw M=32 efC=200 efS=384 metric=l2] N=50000 d=384 topk=10 nq=1000 threads=32 build=62.551s search=0.944s qps=1059.0 avg=0.944ms p50=4.231ms p95=5.620ms p99=24.433ms recall=0.9489
+[hnsw M=32 efC=200 efS=512 metric=l2] N=50000 d=384 topk=10 nq=1000 threads=32 build=55.972s search=1.199s qps=834.2 avg=1.199ms p50=5.907ms p95=7.366ms p99=23.167ms recall=0.9651
+[hnsw M=32 efC=200 efS=640 metric=l2] N=50000 d=384 topk=10 nq=1000 threads=32 build=75.294s search=1.505s qps=664.3 avg=1.505ms p50=6.708ms p95=7.096ms p99=27.545ms recall=0.9783
+[hnsw M=32 efC=200 efS=768 metric=l2] N=50000 d=384 topk=10 nq=1000 threads=32 build=74.161s search=1.809s qps=552.7 avg=1.809ms p50=8.314ms p95=9.994ms p99=31.946ms recall=0.9836
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=50000 d=384 topk=10 nq=1000 threads=32 build=0.061s search=0.760s qps=1315.5 avg=0.760ms p50=11.434ms p95=12.254ms p99=29.181ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=50000 d=384 topk=10 nq=1000 threads=32 build=73.681s search=0.155s qps=6434.5 avg=0.155ms p50=0.951ms p95=1.428ms p99=25.221ms recall=0.6579
+[hnsw M=32 efC=200 efS=128 metric=l2] N=50000 d=384 topk=10 nq=1000 threads=32 build=74.255s search=0.360s qps=2781.0 avg=0.360ms p50=1.671ms p95=4.472ms p99=10.598ms recall=0.8093
+[hnsw M=32 efC=200 efS=256 metric=l2] N=50000 d=384 topk=10 nq=1000 threads=32 build=70.127s search=0.795s qps=1257.4 avg=0.795ms p50=3.290ms p95=4.288ms p99=27.286ms recall=0.9124
+[hnsw M=32 efC=200 efS=384 metric=l2] N=50000 d=384 topk=10 nq=1000 threads=32 build=71.360s search=0.928s qps=1077.9 avg=0.928ms p50=4.482ms p95=6.455ms p99=14.728ms recall=0.9492
+[hnsw M=32 efC=200 efS=512 metric=l2] N=50000 d=384 topk=10 nq=1000 threads=32 build=68.606s search=1.584s qps=631.2 avg=1.584ms p50=5.653ms p95=7.717ms p99=16.058ms recall=0.9654
+[hnsw M=32 efC=200 efS=640 metric=l2] N=50000 d=384 topk=10 nq=1000 threads=32 build=72.529s search=1.955s qps=511.6 avg=1.955ms p50=6.749ms p95=9.390ms p99=19.679ms recall=0.9747
+[hnsw M=32 efC=200 efS=768 metric=l2] N=50000 d=384 topk=10 nq=1000 threads=32 build=67.836s search=1.984s qps=504.0 avg=1.984ms p50=7.761ms p95=8.124ms p99=27.267ms recall=0.9803
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=100000 d=384 topk=10 nq=1000 threads=32 build=0.115s search=2.036s qps=491.1 avg=2.036ms p50=22.050ms p95=22.521ms p99=24.925ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=100000 d=384 topk=10 nq=1000 threads=32 build=107.842s search=0.211s qps=4736.5 avg=0.211ms p50=1.110ms p95=4.448ms p99=22.042ms recall=0.5677
+[hnsw M=32 efC=200 efS=128 metric=l2] N=100000 d=384 topk=10 nq=1000 threads=32 build=191.067s search=0.385s qps=2599.8 avg=0.385ms p50=2.085ms p95=3.037ms p99=26.588ms recall=0.7244
+[hnsw M=32 efC=200 efS=256 metric=l2] N=100000 d=384 topk=10 nq=1000 threads=32 build=183.717s search=0.804s qps=1243.2 avg=0.804ms p50=3.860ms p95=4.948ms p99=12.914ms recall=0.8507
+[hnsw M=32 efC=200 efS=384 metric=l2] N=100000 d=384 topk=10 nq=1000 threads=32 build=189.305s search=1.382s qps=723.4 avg=1.382ms p50=5.476ms p95=7.072ms p99=7.385ms recall=0.9028
+[hnsw M=32 efC=200 efS=512 metric=l2] N=100000 d=384 topk=10 nq=1000 threads=32 build=187.811s search=1.609s qps=621.5 avg=1.609ms p50=7.085ms p95=7.976ms p99=34.178ms recall=0.9316
+[hnsw M=32 efC=200 efS=640 metric=l2] N=100000 d=384 topk=10 nq=1000 threads=32 build=186.064s search=1.930s qps=518.1 avg=1.930ms p50=8.552ms p95=8.829ms p99=52.907ms recall=0.9457
+[hnsw M=32 efC=200 efS=768 metric=l2] N=100000 d=384 topk=10 nq=1000 threads=32 build=188.531s search=2.562s qps=390.4 avg=2.562ms p50=9.975ms p95=10.249ms p99=30.749ms recall=0.9567
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=100000 d=384 topk=10 nq=1000 threads=32 build=0.114s search=1.987s qps=503.3 avg=1.987ms p50=22.171ms p95=22.534ms p99=38.404ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=100000 d=384 topk=10 nq=1000 threads=32 build=182.771s search=0.187s qps=5336.6 avg=0.187ms p50=1.106ms p95=1.643ms p99=24.245ms recall=0.5619
+[hnsw M=32 efC=200 efS=128 metric=l2] N=100000 d=384 topk=10 nq=1000 threads=32 build=167.313s search=0.509s qps=1966.4 avg=0.509ms p50=2.136ms p95=4.710ms p99=13.048ms recall=0.7284
+[hnsw M=32 efC=200 efS=256 metric=l2] N=100000 d=384 topk=10 nq=1000 threads=32 build=181.221s search=0.799s qps=1250.8 avg=0.799ms p50=4.047ms p95=4.869ms p99=5.070ms recall=0.8468
+[hnsw M=32 efC=200 efS=384 metric=l2] N=100000 d=384 topk=10 nq=1000 threads=32 build=192.281s search=1.219s qps=820.7 avg=1.219ms p50=5.899ms p95=7.209ms p99=21.215ms recall=0.8967
+[hnsw M=32 efC=200 efS=512 metric=l2] N=100000 d=384 topk=10 nq=1000 threads=32 build=183.090s search=1.491s qps=670.5 avg=1.491ms p50=7.347ms p95=9.004ms p99=33.114ms recall=0.9242
+[hnsw M=32 efC=200 efS=640 metric=l2] N=100000 d=384 topk=10 nq=1000 threads=32 build=186.824s search=1.965s qps=508.8 avg=1.965ms p50=8.746ms p95=10.544ms p99=48.739ms recall=0.9395
+[hnsw M=32 efC=200 efS=768 metric=l2] N=100000 d=384 topk=10 nq=1000 threads=32 build=178.361s search=2.436s qps=410.5 avg=2.436ms p50=9.977ms p95=10.353ms p99=27.514ms recall=0.9512
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=2500 d=768 topk=10 nq=1000 threads=32 build=0.003s search=0.159s qps=6301.5 avg=0.159ms p50=0.798ms p95=0.823ms p99=9.172ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=2500 d=768 topk=10 nq=1000 threads=32 build=0.887s search=0.089s qps=11258.1 avg=0.089ms p50=0.474ms p95=0.746ms p99=12.653ms recall=0.9648
+[hnsw M=32 efC=200 efS=128 metric=l2] N=2500 d=768 topk=10 nq=1000 threads=32 build=0.990s search=0.150s qps=6651.3 avg=0.150ms p50=0.674ms p95=0.698ms p99=0.784ms recall=0.9954
+[hnsw M=32 efC=200 efS=256 metric=l2] N=2500 d=768 topk=10 nq=1000 threads=32 build=0.897s search=0.245s qps=4081.6 avg=0.245ms p50=0.720ms p95=1.161ms p99=24.402ms recall=0.9994
+[hnsw M=32 efC=200 efS=384 metric=l2] N=2500 d=768 topk=10 nq=1000 threads=32 build=1.177s search=0.322s qps=3103.5 avg=0.322ms p50=0.938ms p95=1.534ms p99=23.117ms recall=0.9998
+[hnsw M=32 efC=200 efS=512 metric=l2] N=2500 d=768 topk=10 nq=1000 threads=32 build=0.962s search=0.421s qps=2372.7 avg=0.421ms p50=1.207ms p95=7.391ms p99=19.520ms recall=1.0000
+[hnsw M=32 efC=200 efS=640 metric=l2] N=2500 d=768 topk=10 nq=1000 threads=32 build=1.411s search=0.484s qps=2064.8 avg=0.484ms p50=1.510ms p95=2.487ms p99=18.754ms recall=0.9999
+[hnsw M=32 efC=200 efS=768 metric=l2] N=2500 d=768 topk=10 nq=1000 threads=32 build=1.108s search=0.548s qps=1826.4 avg=0.548ms p50=1.853ms p95=2.825ms p99=22.378ms recall=1.0000
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=2500 d=768 topk=10 nq=1000 threads=32 build=0.003s search=0.104s qps=9633.9 avg=0.104ms p50=0.803ms p95=0.855ms p99=3.428ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=2500 d=768 topk=10 nq=1000 threads=32 build=1.013s search=0.088s qps=11346.4 avg=0.088ms p50=0.464ms p95=0.714ms p99=23.946ms recall=0.9621
+[hnsw M=32 efC=200 efS=128 metric=l2] N=2500 d=768 topk=10 nq=1000 threads=32 build=0.974s search=0.128s qps=7785.3 avg=0.128ms p50=0.643ms p95=0.872ms p99=15.912ms recall=0.9946
+[hnsw M=32 efC=200 efS=256 metric=l2] N=2500 d=768 topk=10 nq=1000 threads=32 build=1.111s search=0.228s qps=4387.6 avg=0.228ms p50=0.744ms p95=8.173ms p99=9.822ms recall=0.9996
+[hnsw M=32 efC=200 efS=384 metric=l2] N=2500 d=768 topk=10 nq=1000 threads=32 build=1.270s search=0.390s qps=2563.9 avg=0.390ms p50=0.951ms p95=9.732ms p99=11.447ms recall=0.9998
+[hnsw M=32 efC=200 efS=512 metric=l2] N=2500 d=768 topk=10 nq=1000 threads=32 build=1.102s search=0.425s qps=2351.5 avg=0.425ms p50=1.187ms p95=5.112ms p99=10.424ms recall=0.9999
+[hnsw M=32 efC=200 efS=640 metric=l2] N=2500 d=768 topk=10 nq=1000 threads=32 build=1.151s search=0.473s qps=2112.8 avg=0.473ms p50=1.493ms p95=2.379ms p99=18.687ms recall=1.0000
+[hnsw M=32 efC=200 efS=768 metric=l2] N=2500 d=768 topk=10 nq=1000 threads=32 build=1.128s search=0.636s qps=1571.8 avg=0.636ms p50=1.867ms p95=2.557ms p99=26.213ms recall=1.0000
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=5000 d=768 topk=10 nq=1000 threads=32 build=0.005s search=0.166s qps=6011.4 avg=0.166ms p50=1.572ms p95=2.734ms p99=10.890ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=5000 d=768 topk=10 nq=1000 threads=32 build=2.523s search=0.158s qps=6316.4 avg=0.158ms p50=0.575ms p95=1.802ms p99=11.827ms recall=0.9153
+[hnsw M=32 efC=200 efS=128 metric=l2] N=5000 d=768 topk=10 nq=1000 threads=32 build=3.890s search=0.191s qps=5232.8 avg=0.191ms p50=0.767ms p95=1.309ms p99=20.095ms recall=0.9785
+[hnsw M=32 efC=200 efS=256 metric=l2] N=5000 d=768 topk=10 nq=1000 threads=32 build=3.540s search=0.313s qps=3197.5 avg=0.313ms p50=1.146ms p95=5.917ms p99=20.799ms recall=0.9972
+[hnsw M=32 efC=200 efS=384 metric=l2] N=5000 d=768 topk=10 nq=1000 threads=32 build=3.701s search=0.404s qps=2475.0 avg=0.404ms p50=1.459ms p95=11.193ms p99=12.578ms recall=0.9988
+[hnsw M=32 efC=200 efS=512 metric=l2] N=5000 d=768 topk=10 nq=1000 threads=32 build=3.569s search=0.522s qps=1914.6 avg=0.522ms p50=1.854ms p95=6.928ms p99=12.810ms recall=0.9998
+[hnsw M=32 efC=200 efS=640 metric=l2] N=5000 d=768 topk=10 nq=1000 threads=32 build=2.414s search=0.791s qps=1264.9 avg=0.791ms p50=2.145ms p95=3.413ms p99=25.118ms recall=0.9998
+[hnsw M=32 efC=200 efS=768 metric=l2] N=5000 d=768 topk=10 nq=1000 threads=32 build=4.894s search=0.810s qps=1234.9 avg=0.810ms p50=2.693ms p95=8.786ms p99=12.554ms recall=1.0000
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=5000 d=768 topk=10 nq=1000 threads=32 build=0.005s search=0.164s qps=6082.8 avg=0.164ms p50=1.622ms p95=2.502ms p99=16.547ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=5000 d=768 topk=10 nq=1000 threads=32 build=3.909s search=0.127s qps=7869.4 avg=0.127ms p50=0.647ms p95=1.059ms p99=9.210ms recall=0.9069
+[hnsw M=32 efC=200 efS=128 metric=l2] N=5000 d=768 topk=10 nq=1000 threads=32 build=4.637s search=0.201s qps=4973.2 avg=0.201ms p50=0.990ms p95=2.913ms p99=9.604ms recall=0.9778
+[hnsw M=32 efC=200 efS=256 metric=l2] N=5000 d=768 topk=10 nq=1000 threads=32 build=4.328s search=0.268s qps=3729.0 avg=0.268ms p50=1.102ms p95=1.816ms p99=22.808ms recall=0.9966
+[hnsw M=32 efC=200 efS=384 metric=l2] N=5000 d=768 topk=10 nq=1000 threads=32 build=3.687s search=0.424s qps=2360.1 avg=0.424ms p50=1.585ms p95=6.205ms p99=11.055ms recall=0.9985
+[hnsw M=32 efC=200 efS=512 metric=l2] N=5000 d=768 topk=10 nq=1000 threads=32 build=3.916s search=0.534s qps=1872.9 avg=0.534ms p50=1.933ms p95=2.623ms p99=23.702ms recall=0.9999
+[hnsw M=32 efC=200 efS=640 metric=l2] N=5000 d=768 topk=10 nq=1000 threads=32 build=2.923s search=0.995s qps=1004.9 avg=0.995ms p50=2.155ms p95=2.334ms p99=25.014ms recall=0.9995
+[hnsw M=32 efC=200 efS=768 metric=l2] N=5000 d=768 topk=10 nq=1000 threads=32 build=2.449s search=1.291s qps=774.4 avg=1.291ms p50=2.663ms p95=3.219ms p99=25.296ms recall=1.0000
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=7500 d=768 topk=10 nq=1000 threads=32 build=0.007s search=0.199s qps=5033.0 avg=0.199ms p50=2.869ms p95=7.502ms p99=21.029ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=7500 d=768 topk=10 nq=1000 threads=32 build=4.564s search=0.130s qps=7710.6 avg=0.130ms p50=0.645ms p95=1.071ms p99=21.914ms recall=0.8671
+[hnsw M=32 efC=200 efS=128 metric=l2] N=7500 d=768 topk=10 nq=1000 threads=32 build=7.154s search=0.212s qps=4708.1 avg=0.212ms p50=1.240ms p95=1.341ms p99=1.442ms recall=0.9609
+[hnsw M=32 efC=200 efS=256 metric=l2] N=7500 d=768 topk=10 nq=1000 threads=32 build=8.743s search=0.337s qps=2966.3 avg=0.337ms p50=1.587ms p95=8.564ms p99=10.947ms recall=0.9910
+[hnsw M=32 efC=200 efS=384 metric=l2] N=7500 d=768 topk=10 nq=1000 threads=32 build=4.598s search=0.578s qps=1731.0 avg=0.578ms p50=2.121ms p95=4.192ms p99=11.681ms recall=0.9961
+[hnsw M=32 efC=200 efS=512 metric=l2] N=7500 d=768 topk=10 nq=1000 threads=32 build=4.370s search=0.705s qps=1417.8 avg=0.705ms p50=2.508ms p95=3.877ms p99=24.565ms recall=0.9982
+[hnsw M=32 efC=200 efS=640 metric=l2] N=7500 d=768 topk=10 nq=1000 threads=32 build=4.373s search=0.783s qps=1277.2 avg=0.783ms p50=3.278ms p95=8.061ms p99=12.931ms recall=0.9990
+[hnsw M=32 efC=200 efS=768 metric=l2] N=7500 d=768 topk=10 nq=1000 threads=32 build=4.424s search=0.882s qps=1133.5 avg=0.882ms p50=3.558ms p95=3.856ms p99=30.526ms recall=0.9994
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=7500 d=768 topk=10 nq=1000 threads=32 build=0.007s search=0.250s qps=3999.0 avg=0.250ms p50=2.945ms p95=3.487ms p99=11.420ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=7500 d=768 topk=10 nq=1000 threads=32 build=4.846s search=0.130s qps=7699.4 avg=0.130ms p50=0.760ms p95=3.084ms p99=9.803ms recall=0.8646
+[hnsw M=32 efC=200 efS=128 metric=l2] N=7500 d=768 topk=10 nq=1000 threads=32 build=4.273s search=0.247s qps=4048.2 avg=0.247ms p50=1.221ms p95=1.348ms p99=1.864ms recall=0.9585
+[hnsw M=32 efC=200 efS=256 metric=l2] N=7500 d=768 topk=10 nq=1000 threads=32 build=4.642s search=0.367s qps=2722.4 avg=0.367ms p50=1.627ms p95=2.699ms p99=23.896ms recall=0.9920
+[hnsw M=32 efC=200 efS=384 metric=l2] N=7500 d=768 topk=10 nq=1000 threads=32 build=4.434s search=0.485s qps=2063.4 avg=0.485ms p50=1.996ms p95=3.173ms p99=22.120ms recall=0.9981
+[hnsw M=32 efC=200 efS=512 metric=l2] N=7500 d=768 topk=10 nq=1000 threads=32 build=7.917s search=0.696s qps=1436.4 avg=0.696ms p50=2.391ms p95=9.952ms p99=12.260ms recall=0.9993
+[hnsw M=32 efC=200 efS=640 metric=l2] N=7500 d=768 topk=10 nq=1000 threads=32 build=4.474s search=0.837s qps=1194.2 avg=0.837ms p50=3.030ms p95=3.913ms p99=29.187ms recall=0.9998
+[hnsw M=32 efC=200 efS=768 metric=l2] N=7500 d=768 topk=10 nq=1000 threads=32 build=7.129s search=1.042s qps=959.7 avg=1.042ms p50=3.282ms p95=5.395ms p99=22.440ms recall=0.9997
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=10000 d=768 topk=10 nq=1000 threads=32 build=0.015s search=0.338s qps=2959.9 avg=0.338ms p50=4.055ms p95=6.379ms p99=13.510ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=10000 d=768 topk=10 nq=1000 threads=32 build=11.027s search=0.197s qps=5074.6 avg=0.197ms p50=0.943ms p95=1.583ms p99=23.010ms recall=0.8401
+[hnsw M=32 efC=200 efS=128 metric=l2] N=10000 d=768 topk=10 nq=1000 threads=32 build=7.336s search=0.290s qps=3453.5 avg=0.290ms p50=1.573ms p95=10.277ms p99=11.404ms recall=0.9427
+[hnsw M=32 efC=200 efS=256 metric=l2] N=10000 d=768 topk=10 nq=1000 threads=32 build=6.806s search=0.446s qps=2242.2 avg=0.446ms p50=2.080ms p95=3.435ms p99=11.639ms recall=0.9870
+[hnsw M=32 efC=200 efS=384 metric=l2] N=10000 d=768 topk=10 nq=1000 threads=32 build=11.083s search=0.532s qps=1881.0 avg=0.532ms p50=3.112ms p95=3.909ms p99=19.473ms recall=0.9958
+[hnsw M=32 efC=200 efS=512 metric=l2] N=10000 d=768 topk=10 nq=1000 threads=32 build=11.628s search=0.780s qps=1282.0 avg=0.780ms p50=3.644ms p95=4.437ms p99=31.068ms recall=0.9985
+[hnsw M=32 efC=200 efS=640 metric=l2] N=10000 d=768 topk=10 nq=1000 threads=32 build=10.707s search=0.897s qps=1115.4 avg=0.897ms p50=3.940ms p95=8.587ms p99=13.143ms recall=0.9987
+[hnsw M=32 efC=200 efS=768 metric=l2] N=10000 d=768 topk=10 nq=1000 threads=32 build=12.006s search=1.094s qps=913.7 avg=1.094ms p50=4.400ms p95=6.491ms p99=19.047ms recall=0.9992
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=10000 d=768 topk=10 nq=1000 threads=32 build=0.010s search=0.246s qps=4066.9 avg=0.246ms p50=4.110ms p95=4.787ms p99=13.563ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=10000 d=768 topk=10 nq=1000 threads=32 build=6.980s search=0.151s qps=6604.7 avg=0.151ms p50=0.924ms p95=1.013ms p99=1.196ms recall=0.8441
+[hnsw M=32 efC=200 efS=128 metric=l2] N=10000 d=768 topk=10 nq=1000 threads=32 build=10.593s search=0.239s qps=4186.8 avg=0.239ms p50=1.218ms p95=9.813ms p99=20.860ms recall=0.9478
+[hnsw M=32 efC=200 efS=256 metric=l2] N=10000 d=768 topk=10 nq=1000 threads=32 build=6.751s search=0.412s qps=2424.5 avg=0.412ms p50=2.075ms p95=6.554ms p99=11.357ms recall=0.9863
+[hnsw M=32 efC=200 efS=384 metric=l2] N=10000 d=768 topk=10 nq=1000 threads=32 build=10.413s search=0.565s qps=1769.5 avg=0.565ms p50=2.591ms p95=3.725ms p99=12.840ms recall=0.9958
+[hnsw M=32 efC=200 efS=512 metric=l2] N=10000 d=768 topk=10 nq=1000 threads=32 build=10.864s search=0.831s qps=1203.9 avg=0.831ms p50=3.313ms p95=4.017ms p99=44.664ms recall=0.9975
+[hnsw M=32 efC=200 efS=640 metric=l2] N=10000 d=768 topk=10 nq=1000 threads=32 build=10.781s search=0.946s qps=1056.8 avg=0.946ms p50=3.761ms p95=5.288ms p99=20.911ms recall=0.9987
+[hnsw M=32 efC=200 efS=768 metric=l2] N=10000 d=768 topk=10 nq=1000 threads=32 build=11.724s search=1.150s qps=869.4 avg=1.150ms p50=4.249ms p95=4.969ms p99=22.572ms recall=0.9991
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=25000 d=768 topk=10 nq=1000 threads=32 build=0.023s search=0.907s qps=1102.6 avg=0.907ms p50=11.226ms p95=11.415ms p99=29.807ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=25000 d=768 topk=10 nq=1000 threads=32 build=47.404s search=0.261s qps=3832.2 avg=0.261ms p50=1.051ms p95=1.628ms p99=23.429ms recall=0.7131
+[hnsw M=32 efC=200 efS=128 metric=l2] N=25000 d=768 topk=10 nq=1000 threads=32 build=29.794s search=0.416s qps=2404.6 avg=0.416ms p50=1.925ms p95=2.672ms p99=22.101ms recall=0.8576
+[hnsw M=32 efC=200 efS=256 metric=l2] N=25000 d=768 topk=10 nq=1000 threads=32 build=40.074s search=0.780s qps=1282.2 avg=0.780ms p50=3.263ms p95=4.690ms p99=13.166ms recall=0.9454
+[hnsw M=32 efC=200 efS=384 metric=l2] N=25000 d=768 topk=10 nq=1000 threads=32 build=39.712s search=1.246s qps=802.3 avg=1.246ms p50=4.563ms p95=4.969ms p99=16.833ms recall=0.9731
+[hnsw M=32 efC=200 efS=512 metric=l2] N=25000 d=768 topk=10 nq=1000 threads=32 build=41.855s search=1.903s qps=525.5 avg=1.903ms p50=5.396ms p95=6.060ms p99=16.149ms recall=0.9814
+[hnsw M=32 efC=200 efS=640 metric=l2] N=25000 d=768 topk=10 nq=1000 threads=32 build=42.368s search=1.853s qps=539.8 avg=1.853ms p50=6.493ms p95=8.102ms p99=18.670ms recall=0.9872
+[hnsw M=32 efC=200 efS=768 metric=l2] N=25000 d=768 topk=10 nq=1000 threads=32 build=40.619s search=1.985s qps=503.8 avg=1.985ms p50=7.654ms p95=8.916ms p99=29.895ms recall=0.9913
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=25000 d=768 topk=10 nq=1000 threads=32 build=0.059s search=0.631s qps=1585.4 avg=0.631ms p50=11.299ms p95=12.057ms p99=29.661ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=25000 d=768 topk=10 nq=1000 threads=32 build=41.882s search=0.254s qps=3930.4 avg=0.254ms p50=1.146ms p95=9.683ms p99=10.023ms recall=0.7204
+[hnsw M=32 efC=200 efS=128 metric=l2] N=25000 d=768 topk=10 nq=1000 threads=32 build=45.127s search=0.391s qps=2557.4 avg=0.391ms p50=1.841ms p95=2.711ms p99=26.520ms recall=0.8697
+[hnsw M=32 efC=200 efS=256 metric=l2] N=25000 d=768 topk=10 nq=1000 threads=32 build=43.249s search=0.764s qps=1308.7 avg=0.764ms p50=3.386ms p95=3.661ms p99=32.724ms recall=0.9487
+[hnsw M=32 efC=200 efS=384 metric=l2] N=25000 d=768 topk=10 nq=1000 threads=32 build=42.056s search=1.448s qps=690.7 avg=1.448ms p50=4.553ms p95=5.972ms p99=14.999ms recall=0.9709
+[hnsw M=32 efC=200 efS=512 metric=l2] N=25000 d=768 topk=10 nq=1000 threads=32 build=42.260s search=1.531s qps=653.3 avg=1.531ms p50=5.543ms p95=6.907ms p99=22.387ms recall=0.9822
+[hnsw M=32 efC=200 efS=640 metric=l2] N=25000 d=768 topk=10 nq=1000 threads=32 build=27.112s search=2.020s qps=495.0 avg=2.020ms p50=6.652ms p95=7.223ms p99=17.216ms recall=0.9883
+[hnsw M=32 efC=200 efS=768 metric=l2] N=25000 d=768 topk=10 nq=1000 threads=32 build=42.062s search=2.161s qps=462.8 avg=2.161ms p50=7.321ms p95=8.974ms p99=25.920ms recall=0.9925
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=50000 d=768 topk=10 nq=1000 threads=32 build=0.115s search=1.453s qps=688.5 avg=1.453ms p50=22.221ms p95=22.546ms p99=49.851ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=50000 d=768 topk=10 nq=1000 threads=32 build=75.222s search=0.263s qps=3799.1 avg=0.263ms p50=1.317ms p95=4.916ms p99=10.264ms recall=0.6287
+[hnsw M=32 efC=200 efS=128 metric=l2] N=50000 d=768 topk=10 nq=1000 threads=32 build=109.032s search=0.470s qps=2127.5 avg=0.470ms p50=2.333ms p95=3.126ms p99=26.703ms recall=0.7836
+[hnsw M=32 efC=200 efS=256 metric=l2] N=50000 d=768 topk=10 nq=1000 threads=32 build=108.986s search=0.990s qps=1010.2 avg=0.990ms p50=4.237ms p95=7.285ms p99=17.728ms recall=0.8980
+[hnsw M=32 efC=200 efS=384 metric=l2] N=50000 d=768 topk=10 nq=1000 threads=32 build=108.837s search=1.319s qps=758.2 avg=1.319ms p50=6.107ms p95=7.082ms p99=26.368ms recall=0.9363
+[hnsw M=32 efC=200 efS=512 metric=l2] N=50000 d=768 topk=10 nq=1000 threads=32 build=107.336s search=1.964s qps=509.2 avg=1.964ms p50=7.358ms p95=8.650ms p99=44.539ms recall=0.9566
+[hnsw M=32 efC=200 efS=640 metric=l2] N=50000 d=768 topk=10 nq=1000 threads=32 build=109.379s search=3.167s qps=315.8 avg=3.167ms p50=8.549ms p95=11.329ms p99=19.484ms recall=0.9701
+[hnsw M=32 efC=200 efS=768 metric=l2] N=50000 d=768 topk=10 nq=1000 threads=32 build=107.026s search=2.684s qps=372.6 avg=2.684ms p50=9.903ms p95=10.910ms p99=31.396ms recall=0.9754
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=50000 d=768 topk=10 nq=1000 threads=32 build=0.120s search=1.293s qps=773.5 avg=1.293ms p50=22.313ms p95=23.482ms p99=32.100ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=50000 d=768 topk=10 nq=1000 threads=32 build=93.396s search=0.294s qps=3397.9 avg=0.294ms p50=1.256ms p95=2.087ms p99=20.965ms recall=0.6222
+[hnsw M=32 efC=200 efS=128 metric=l2] N=50000 d=768 topk=10 nq=1000 threads=32 build=74.781s search=0.509s qps=1964.9 avg=0.509ms p50=2.442ms p95=8.846ms p99=12.056ms recall=0.7832
+[hnsw M=32 efC=200 efS=256 metric=l2] N=50000 d=768 topk=10 nq=1000 threads=32 build=81.094s search=1.059s qps=944.7 avg=1.059ms p50=4.174ms p95=10.864ms p99=14.254ms recall=0.8912
+[hnsw M=32 efC=200 efS=384 metric=l2] N=50000 d=768 topk=10 nq=1000 threads=32 build=106.493s search=1.758s qps=568.7 avg=1.758ms p50=5.891ms p95=6.934ms p99=7.545ms recall=0.9322
+[hnsw M=32 efC=200 efS=512 metric=l2] N=50000 d=768 topk=10 nq=1000 threads=32 build=73.520s search=1.943s qps=514.8 avg=1.943ms p50=7.334ms p95=7.625ms p99=17.988ms recall=0.9523
+[hnsw M=32 efC=200 efS=640 metric=l2] N=50000 d=768 topk=10 nq=1000 threads=32 build=75.546s search=2.673s qps=374.2 avg=2.673ms p50=8.509ms p95=10.262ms p99=16.934ms recall=0.9666
+[hnsw M=32 efC=200 efS=768 metric=l2] N=50000 d=768 topk=10 nq=1000 threads=32 build=103.584s search=2.854s qps=350.4 avg=2.854ms p50=9.818ms p95=11.407ms p99=29.009ms recall=0.9745
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=100000 d=768 topk=10 nq=1000 threads=32 build=0.239s search=2.326s qps=429.9 avg=2.326ms p50=45.225ms p95=45.980ms p99=56.789ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=100000 d=768 topk=10 nq=1000 threads=32 build=211.655s search=0.304s qps=3286.9 avg=0.304ms p50=1.506ms p95=4.755ms p99=9.609ms recall=0.5306
+[hnsw M=32 efC=200 efS=128 metric=l2] N=100000 d=768 topk=10 nq=1000 threads=32 build=242.342s search=0.586s qps=1705.4 avg=0.586ms p50=2.752ms p95=3.683ms p99=12.416ms recall=0.6864
+[hnsw M=32 efC=200 efS=256 metric=l2] N=100000 d=768 topk=10 nq=1000 threads=32 build=228.612s search=1.230s qps=813.0 avg=1.230ms p50=5.164ms p95=6.826ms p99=19.716ms recall=0.8204
+[hnsw M=32 efC=200 efS=384 metric=l2] N=100000 d=768 topk=10 nq=1000 threads=32 build=197.488s search=1.840s qps=543.5 avg=1.840ms p50=7.098ms p95=8.445ms p99=9.098ms recall=0.8742
+[hnsw M=32 efC=200 efS=512 metric=l2] N=100000 d=768 topk=10 nq=1000 threads=32 build=176.859s search=2.391s qps=418.3 avg=2.391ms p50=9.090ms p95=10.358ms p99=42.108ms recall=0.9089
+[hnsw M=32 efC=200 efS=640 metric=l2] N=100000 d=768 topk=10 nq=1000 threads=32 build=244.364s search=3.021s qps=331.0 avg=3.021ms p50=10.664ms p95=10.932ms p99=30.194ms recall=0.9276
+[hnsw M=32 efC=200 efS=768 metric=l2] N=100000 d=768 topk=10 nq=1000 threads=32 build=219.277s search=3.442s qps=290.5 avg=3.442ms p50=12.474ms p95=12.889ms p99=32.288ms recall=0.9396
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=100000 d=768 topk=10 nq=1000 threads=32 build=0.229s search=2.453s qps=407.6 avg=2.453ms p50=44.903ms p95=45.563ms p99=56.986ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=100000 d=768 topk=10 nq=1000 threads=32 build=239.727s search=0.306s qps=3271.6 avg=0.306ms p50=1.511ms p95=4.693ms p99=15.828ms recall=0.5300
+[hnsw M=32 efC=200 efS=128 metric=l2] N=100000 d=768 topk=10 nq=1000 threads=32 build=243.895s search=0.582s qps=1717.7 avg=0.582ms p50=2.714ms p95=3.897ms p99=16.776ms recall=0.6795
+[hnsw M=32 efC=200 efS=256 metric=l2] N=100000 d=768 topk=10 nq=1000 threads=32 build=230.179s search=1.127s qps=887.5 avg=1.127ms p50=5.035ms p95=6.272ms p99=12.524ms recall=0.8157
+[hnsw M=32 efC=200 efS=384 metric=l2] N=100000 d=768 topk=10 nq=1000 threads=32 build=180.359s search=2.152s qps=464.6 avg=2.152ms p50=7.149ms p95=8.731ms p99=9.542ms recall=0.8732
+[hnsw M=32 efC=200 efS=512 metric=l2] N=100000 d=768 topk=10 nq=1000 threads=32 build=232.616s search=2.469s qps=405.0 avg=2.469ms p50=9.008ms p95=9.379ms p99=22.965ms recall=0.9037
+[hnsw M=32 efC=200 efS=640 metric=l2] N=100000 d=768 topk=10 nq=1000 threads=32 build=238.798s search=2.774s qps=360.5 avg=2.774ms p50=10.731ms p95=11.549ms p99=39.910ms recall=0.9231
+[hnsw M=32 efC=200 efS=768 metric=l2] N=100000 d=768 topk=10 nq=1000 threads=32 build=228.863s search=3.660s qps=273.2 avg=3.660ms p50=12.283ms p95=13.055ms p99=46.723ms recall=0.9366
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=2500 d=1536 topk=10 nq=1000 threads=32 build=0.005s search=0.147s qps=6782.8 avg=0.147ms p50=1.600ms p95=2.569ms p99=23.811ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=2500 d=1536 topk=10 nq=1000 threads=32 build=2.482s search=0.167s qps=5994.5 avg=0.167ms p50=0.662ms p95=1.156ms p99=14.095ms recall=0.9556
+[hnsw M=32 efC=200 efS=128 metric=l2] N=2500 d=1536 topk=10 nq=1000 threads=32 build=1.416s search=0.274s qps=3655.1 avg=0.274ms p50=0.928ms p95=8.769ms p99=10.320ms recall=0.9940
+[hnsw M=32 efC=200 efS=256 metric=l2] N=2500 d=1536 topk=10 nq=1000 threads=32 build=1.506s search=0.435s qps=2299.9 avg=0.435ms p50=1.210ms p95=1.968ms p99=10.424ms recall=0.9995
+[hnsw M=32 efC=200 efS=384 metric=l2] N=2500 d=1536 topk=10 nq=1000 threads=32 build=1.518s search=0.634s qps=1576.8 avg=0.634ms p50=1.422ms p95=1.929ms p99=8.662ms recall=0.9999
+[hnsw M=32 efC=200 efS=512 metric=l2] N=2500 d=1536 topk=10 nq=1000 threads=32 build=1.605s search=0.740s qps=1351.8 avg=0.740ms p50=1.836ms p95=2.902ms p99=25.079ms recall=1.0000
+[hnsw M=32 efC=200 efS=640 metric=l2] N=2500 d=1536 topk=10 nq=1000 threads=32 build=1.620s search=0.945s qps=1058.7 avg=0.945ms p50=2.172ms p95=3.040ms p99=8.427ms recall=1.0000
+[hnsw M=32 efC=200 efS=768 metric=l2] N=2500 d=1536 topk=10 nq=1000 threads=32 build=1.465s search=1.255s qps=796.8 avg=1.255ms p50=2.428ms p95=3.646ms p99=23.828ms recall=1.0000
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=2500 d=1536 topk=10 nq=1000 threads=32 build=0.005s search=0.130s qps=7685.1 avg=0.130ms p50=1.592ms p95=5.745ms p99=11.304ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=2500 d=1536 topk=10 nq=1000 threads=32 build=1.642s search=0.184s qps=5437.9 avg=0.184ms p50=0.677ms p95=1.004ms p99=15.274ms recall=0.9585
+[hnsw M=32 efC=200 efS=128 metric=l2] N=2500 d=1536 topk=10 nq=1000 threads=32 build=2.111s search=0.234s qps=4277.7 avg=0.234ms p50=0.994ms p95=1.419ms p99=9.976ms recall=0.9930
+[hnsw M=32 efC=200 efS=256 metric=l2] N=2500 d=1536 topk=10 nq=1000 threads=32 build=1.555s search=0.416s qps=2401.9 avg=0.416ms p50=1.530ms p95=1.623ms p99=2.441ms recall=0.9994
+[hnsw M=32 efC=200 efS=384 metric=l2] N=2500 d=1536 topk=10 nq=1000 threads=32 build=1.745s search=0.508s qps=1968.0 avg=0.508ms p50=1.469ms p95=8.157ms p99=10.943ms recall=0.9999
+[hnsw M=32 efC=200 efS=512 metric=l2] N=2500 d=1536 topk=10 nq=1000 threads=32 build=2.519s search=0.797s qps=1254.5 avg=0.797ms p50=1.791ms p95=3.209ms p99=17.772ms recall=0.9999
+[hnsw M=32 efC=200 efS=640 metric=l2] N=2500 d=1536 topk=10 nq=1000 threads=32 build=2.446s search=1.066s qps=937.9 avg=1.066ms p50=2.236ms p95=3.031ms p99=25.021ms recall=0.9999
+[hnsw M=32 efC=200 efS=768 metric=l2] N=2500 d=1536 topk=10 nq=1000 threads=32 build=1.719s search=1.197s qps=835.7 avg=1.197ms p50=2.948ms p95=7.407ms p99=17.723ms recall=0.9999
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=5000 d=1536 topk=10 nq=1000 threads=32 build=0.010s search=0.248s qps=4031.5 avg=0.248ms p50=4.148ms p95=4.991ms p99=12.037ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=5000 d=1536 topk=10 nq=1000 threads=32 build=4.647s search=0.269s qps=3724.1 avg=0.269ms p50=1.167ms p95=4.273ms p99=12.497ms recall=0.8954
+[hnsw M=32 efC=200 efS=128 metric=l2] N=5000 d=1536 topk=10 nq=1000 threads=32 build=6.583s search=0.429s qps=2329.4 avg=0.429ms p50=1.593ms p95=6.870ms p99=9.988ms recall=0.9728
+[hnsw M=32 efC=200 efS=256 metric=l2] N=5000 d=1536 topk=10 nq=1000 threads=32 build=8.120s search=0.668s qps=1496.4 avg=0.668ms p50=2.436ms p95=3.167ms p99=24.579ms recall=0.9955
+[hnsw M=32 efC=200 efS=384 metric=l2] N=5000 d=1536 topk=10 nq=1000 threads=32 build=6.626s search=0.825s qps=1212.6 avg=0.825ms p50=3.065ms p95=6.679ms p99=26.811ms recall=0.9987
+[hnsw M=32 efC=200 efS=512 metric=l2] N=5000 d=1536 topk=10 nq=1000 threads=32 build=6.375s search=0.970s qps=1030.6 avg=0.970ms p50=3.586ms p95=4.687ms p99=25.833ms recall=0.9991
+[hnsw M=32 efC=200 efS=640 metric=l2] N=5000 d=1536 topk=10 nq=1000 threads=32 build=6.832s search=1.225s qps=816.3 avg=1.225ms p50=4.017ms p95=4.947ms p99=28.438ms recall=0.9997
+[hnsw M=32 efC=200 efS=768 metric=l2] N=5000 d=1536 topk=10 nq=1000 threads=32 build=4.528s search=1.376s qps=726.9 avg=1.376ms p50=4.405ms p95=5.744ms p99=29.547ms recall=1.0000
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=5000 d=1536 topk=10 nq=1000 threads=32 build=0.011s search=0.316s qps=3162.7 avg=0.316ms p50=4.283ms p95=4.691ms p99=5.070ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=5000 d=1536 topk=10 nq=1000 threads=32 build=4.930s search=0.219s qps=4573.4 avg=0.219ms p50=1.036ms p95=1.626ms p99=20.958ms recall=0.9031
+[hnsw M=32 efC=200 efS=128 metric=l2] N=5000 d=1536 topk=10 nq=1000 threads=32 build=4.369s search=0.371s qps=2696.7 avg=0.371ms p50=1.686ms p95=5.953ms p99=11.487ms recall=0.9735
+[hnsw M=32 efC=200 efS=256 metric=l2] N=5000 d=1536 topk=10 nq=1000 threads=32 build=4.330s search=0.594s qps=1684.2 avg=0.594ms p50=2.386ms p95=2.951ms p99=3.315ms recall=0.9966
+[hnsw M=32 efC=200 efS=384 metric=l2] N=5000 d=1536 topk=10 nq=1000 threads=32 build=4.260s search=0.757s qps=1320.7 avg=0.757ms p50=2.795ms p95=3.694ms p99=9.053ms recall=0.9990
+[hnsw M=32 efC=200 efS=512 metric=l2] N=5000 d=1536 topk=10 nq=1000 threads=32 build=4.473s search=1.278s qps=782.3 avg=1.278ms p50=3.435ms p95=4.881ms p99=25.511ms recall=0.9993
+[hnsw M=32 efC=200 efS=640 metric=l2] N=5000 d=1536 topk=10 nq=1000 threads=32 build=6.706s search=1.173s qps=852.3 avg=1.173ms p50=3.888ms p95=5.724ms p99=14.287ms recall=0.9997
+[hnsw M=32 efC=200 efS=768 metric=l2] N=5000 d=1536 topk=10 nq=1000 threads=32 build=4.635s search=1.434s qps=697.2 avg=1.434ms p50=4.173ms p95=9.255ms p99=14.392ms recall=0.9996
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=7500 d=1536 topk=10 nq=1000 threads=32 build=0.014s search=0.415s qps=2408.4 avg=0.415ms p50=6.642ms p95=7.234ms p99=15.987ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=7500 d=1536 topk=10 nq=1000 threads=32 build=12.417s search=0.274s qps=3644.9 avg=0.274ms p50=1.450ms p95=1.716ms p99=2.291ms recall=0.8553
+[hnsw M=32 efC=200 efS=128 metric=l2] N=7500 d=1536 topk=10 nq=1000 threads=32 build=8.575s search=0.463s qps=2159.6 avg=0.463ms p50=2.283ms p95=7.934ms p99=11.673ms recall=0.9530
+[hnsw M=32 efC=200 efS=256 metric=l2] N=7500 d=1536 topk=10 nq=1000 threads=32 build=12.103s search=0.957s qps=1044.6 avg=0.957ms p50=3.520ms p95=4.005ms p99=4.225ms recall=0.9880
+[hnsw M=32 efC=200 efS=384 metric=l2] N=7500 d=1536 topk=10 nq=1000 threads=32 build=12.006s search=1.019s qps=981.0 avg=1.019ms p50=4.272ms p95=5.393ms p99=30.410ms recall=0.9955
+[hnsw M=32 efC=200 efS=512 metric=l2] N=7500 d=1536 topk=10 nq=1000 threads=32 build=8.440s search=1.309s qps=764.2 avg=1.309ms p50=4.944ms p95=6.416ms p99=14.880ms recall=0.9981
+[hnsw M=32 efC=200 efS=640 metric=l2] N=7500 d=1536 topk=10 nq=1000 threads=32 build=13.132s search=1.660s qps=602.2 avg=1.660ms p50=5.741ms p95=6.784ms p99=38.857ms recall=0.9981
+[hnsw M=32 efC=200 efS=768 metric=l2] N=7500 d=1536 topk=10 nq=1000 threads=32 build=12.750s search=2.022s qps=494.5 avg=2.022ms p50=5.949ms p95=7.848ms p99=16.932ms recall=0.9994
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=7500 d=1536 topk=10 nq=1000 threads=32 build=0.042s search=0.350s qps=2859.4 avg=0.350ms p50=6.564ms p95=15.457ms p99=15.931ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=7500 d=1536 topk=10 nq=1000 threads=32 build=9.027s search=0.282s qps=3541.2 avg=0.282ms p50=1.372ms p95=1.819ms p99=26.551ms recall=0.8604
+[hnsw M=32 efC=200 efS=128 metric=l2] N=7500 d=1536 topk=10 nq=1000 threads=32 build=9.908s search=0.477s qps=2094.7 avg=0.477ms p50=2.237ms p95=5.652ms p99=11.654ms recall=0.9566
+[hnsw M=32 efC=200 efS=256 metric=l2] N=7500 d=1536 topk=10 nq=1000 threads=32 build=12.219s search=0.816s qps=1225.5 avg=0.816ms p50=3.634ms p95=4.674ms p99=13.384ms recall=0.9916
+[hnsw M=32 efC=200 efS=384 metric=l2] N=7500 d=1536 topk=10 nq=1000 threads=32 build=8.514s search=0.951s qps=1051.6 avg=0.951ms p50=4.393ms p95=5.493ms p99=19.371ms recall=0.9973
+[hnsw M=32 efC=200 efS=512 metric=l2] N=7500 d=1536 topk=10 nq=1000 threads=32 build=12.672s search=1.234s qps=810.2 avg=1.234ms p50=4.784ms p95=6.197ms p99=6.316ms recall=0.9982
+[hnsw M=32 efC=200 efS=640 metric=l2] N=7500 d=1536 topk=10 nq=1000 threads=32 build=8.682s search=1.759s qps=568.4 avg=1.759ms p50=5.346ms p95=7.540ms p99=15.909ms recall=0.9997
+[hnsw M=32 efC=200 efS=768 metric=l2] N=7500 d=1536 topk=10 nq=1000 threads=32 build=12.188s search=1.939s qps=515.7 avg=1.939ms p50=5.974ms p95=7.255ms p99=22.812ms recall=0.9993
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=10000 d=1536 topk=10 nq=1000 threads=32 build=0.046s search=0.598s qps=1672.5 avg=0.598ms p50=8.947ms p95=9.624ms p99=18.198ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=10000 d=1536 topk=10 nq=1000 threads=32 build=19.586s search=0.358s qps=2792.2 avg=0.358ms p50=1.698ms p95=1.999ms p99=2.214ms recall=0.8213
+[hnsw M=32 efC=200 efS=128 metric=l2] N=10000 d=1536 topk=10 nq=1000 threads=32 build=18.287s search=0.546s qps=1830.4 avg=0.546ms p50=2.738ms p95=3.458ms p99=20.259ms recall=0.9394
+[hnsw M=32 efC=200 efS=256 metric=l2] N=10000 d=1536 topk=10 nq=1000 threads=32 build=17.533s search=1.006s qps=994.3 avg=1.006ms p50=3.921ms p95=4.912ms p99=13.182ms recall=0.9831
+[hnsw M=32 efC=200 efS=384 metric=l2] N=10000 d=1536 topk=10 nq=1000 threads=32 build=13.092s search=1.445s qps=692.1 avg=1.445ms p50=5.061ms p95=10.865ms p99=16.746ms recall=0.9931
+[hnsw M=32 efC=200 efS=512 metric=l2] N=10000 d=1536 topk=10 nq=1000 threads=32 build=18.385s search=1.717s qps=582.5 avg=1.717ms p50=5.860ms p95=7.574ms p99=17.499ms recall=0.9961
+[hnsw M=32 efC=200 efS=640 metric=l2] N=10000 d=1536 topk=10 nq=1000 threads=32 build=18.604s search=2.244s qps=445.7 avg=2.244ms p50=6.510ms p95=7.042ms p99=49.315ms recall=0.9973
+[hnsw M=32 efC=200 efS=768 metric=l2] N=10000 d=1536 topk=10 nq=1000 threads=32 build=18.819s search=1.958s qps=510.7 avg=1.958ms p50=7.370ms p95=7.746ms p99=55.720ms recall=0.9982
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=10000 d=1536 topk=10 nq=1000 threads=32 build=0.047s search=0.639s qps=1564.2 avg=0.639ms p50=8.961ms p95=9.078ms p99=30.484ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=10000 d=1536 topk=10 nq=1000 threads=32 build=19.410s search=0.399s qps=2503.7 avg=0.399ms p50=1.587ms p95=2.215ms p99=20.681ms recall=0.8114
+[hnsw M=32 efC=200 efS=128 metric=l2] N=10000 d=1536 topk=10 nq=1000 threads=32 build=17.038s search=0.579s qps=1726.2 avg=0.579ms p50=2.563ms p95=3.064ms p99=45.836ms recall=0.9290
+[hnsw M=32 efC=200 efS=256 metric=l2] N=10000 d=1536 topk=10 nq=1000 threads=32 build=14.485s search=0.933s qps=1071.4 avg=0.933ms p50=4.086ms p95=4.946ms p99=5.084ms recall=0.9815
+[hnsw M=32 efC=200 efS=384 metric=l2] N=10000 d=1536 topk=10 nq=1000 threads=32 build=14.163s search=1.589s qps=629.3 avg=1.589ms p50=5.013ms p95=5.313ms p99=27.675ms recall=0.9929
+[hnsw M=32 efC=200 efS=512 metric=l2] N=10000 d=1536 topk=10 nq=1000 threads=32 build=13.764s search=1.581s qps=632.5 avg=1.581ms p50=5.785ms p95=6.234ms p99=32.711ms recall=0.9962
+[hnsw M=32 efC=200 efS=640 metric=l2] N=10000 d=1536 topk=10 nq=1000 threads=32 build=13.600s search=1.948s qps=513.3 avg=1.948ms p50=6.653ms p95=6.948ms p99=17.183ms recall=0.9982
+[hnsw M=32 efC=200 efS=768 metric=l2] N=10000 d=1536 topk=10 nq=1000 threads=32 build=20.218s search=2.414s qps=414.3 avg=2.414ms p50=7.393ms p95=7.718ms p99=19.675ms recall=0.9982
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=25000 d=1536 topk=10 nq=1000 threads=32 build=0.114s search=0.873s qps=1145.9 avg=0.873ms p50=22.449ms p95=22.660ms p99=37.957ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=25000 d=1536 topk=10 nq=1000 threads=32 build=64.551s search=0.427s qps=2339.7 avg=0.427ms p50=2.105ms p95=2.762ms p99=10.800ms recall=0.7006
+[hnsw M=32 efC=200 efS=128 metric=l2] N=25000 d=1536 topk=10 nq=1000 threads=32 build=66.368s search=0.924s qps=1082.1 avg=0.924ms p50=3.594ms p95=6.740ms p99=13.438ms recall=0.8472
+[hnsw M=32 efC=200 efS=256 metric=l2] N=25000 d=1536 topk=10 nq=1000 threads=32 build=61.367s search=1.698s qps=588.9 avg=1.698ms p50=5.987ms p95=6.444ms p99=35.201ms recall=0.9372
+[hnsw M=32 efC=200 efS=384 metric=l2] N=25000 d=1536 topk=10 nq=1000 threads=32 build=54.011s search=2.426s qps=412.3 avg=2.426ms p50=7.923ms p95=9.338ms p99=9.872ms recall=0.9648
+[hnsw M=32 efC=200 efS=512 metric=l2] N=25000 d=1536 topk=10 nq=1000 threads=32 build=61.931s search=3.005s qps=332.8 avg=3.005ms p50=9.439ms p95=9.908ms p99=61.565ms recall=0.9779
+[hnsw M=32 efC=200 efS=640 metric=l2] N=25000 d=1536 topk=10 nq=1000 threads=32 build=63.531s search=4.390s qps=227.8 avg=4.390ms p50=10.876ms p95=11.196ms p99=30.690ms recall=0.9856
+[hnsw M=32 efC=200 efS=768 metric=l2] N=25000 d=1536 topk=10 nq=1000 threads=32 build=65.836s search=4.086s qps=244.7 avg=4.086ms p50=12.058ms p95=12.433ms p99=37.442ms recall=0.9887
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=25000 d=1536 topk=10 nq=1000 threads=32 build=0.114s search=1.745s qps=573.0 avg=1.745ms p50=22.402ms p95=22.683ms p99=49.824ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=25000 d=1536 topk=10 nq=1000 threads=32 build=63.676s search=0.464s qps=2154.8 avg=0.464ms p50=2.105ms p95=2.663ms p99=25.705ms recall=0.6956
+[hnsw M=32 efC=200 efS=128 metric=l2] N=25000 d=1536 topk=10 nq=1000 threads=32 build=55.290s search=0.945s qps=1058.4 avg=0.945ms p50=3.640ms p95=4.310ms p99=35.096ms recall=0.8415
+[hnsw M=32 efC=200 efS=256 metric=l2] N=25000 d=1536 topk=10 nq=1000 threads=32 build=64.571s search=1.674s qps=597.4 avg=1.674ms p50=6.039ms p95=6.504ms p99=22.424ms recall=0.9360
+[hnsw M=32 efC=200 efS=384 metric=l2] N=25000 d=1536 topk=10 nq=1000 threads=32 build=64.199s search=1.997s qps=500.9 avg=1.997ms p50=8.015ms p95=8.291ms p99=29.842ms recall=0.9644
+[hnsw M=32 efC=200 efS=512 metric=l2] N=25000 d=1536 topk=10 nq=1000 threads=32 build=61.232s search=3.063s qps=326.5 avg=3.063ms p50=9.387ms p95=10.085ms p99=50.801ms recall=0.9770
+[hnsw M=32 efC=200 efS=640 metric=l2] N=25000 d=1536 topk=10 nq=1000 threads=32 build=65.836s search=3.429s qps=291.6 avg=3.429ms p50=10.954ms p95=11.285ms p99=35.123ms recall=0.9846
+[hnsw M=32 efC=200 efS=768 metric=l2] N=25000 d=1536 topk=10 nq=1000 threads=32 build=61.840s search=4.586s qps=218.1 avg=4.586ms p50=12.418ms p95=14.155ms p99=31.273ms recall=0.9889
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=50000 d=1536 topk=10 nq=1000 threads=32 build=0.244s search=2.637s qps=379.2 avg=2.637ms p50=46.531ms p95=48.544ms p99=51.057ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=50000 d=1536 topk=10 nq=1000 threads=32 build=150.006s search=0.511s qps=1958.2 avg=0.511ms p50=2.423ms p95=3.066ms p99=18.838ms recall=0.6023
+[hnsw M=32 efC=200 efS=128 metric=l2] N=50000 d=1536 topk=10 nq=1000 threads=32 build=153.226s search=1.078s qps=927.4 avg=1.078ms p50=4.259ms p95=5.189ms p99=5.438ms recall=0.7598
+[hnsw M=32 efC=200 efS=256 metric=l2] N=50000 d=1536 topk=10 nq=1000 threads=32 build=148.723s search=2.075s qps=481.8 avg=2.075ms p50=7.339ms p95=7.753ms p99=19.918ms recall=0.8758
+[hnsw M=32 efC=200 efS=384 metric=l2] N=50000 d=1536 topk=10 nq=1000 threads=32 build=156.206s search=2.781s qps=359.6 avg=2.781ms p50=9.777ms p95=10.368ms p99=13.633ms recall=0.9243
+[hnsw M=32 efC=200 efS=512 metric=l2] N=50000 d=1536 topk=10 nq=1000 threads=32 build=150.595s search=3.891s qps=257.0 avg=3.891ms p50=12.186ms p95=12.441ms p99=39.089ms recall=0.9438
+[hnsw M=32 efC=200 efS=640 metric=l2] N=50000 d=1536 topk=10 nq=1000 threads=32 build=152.096s search=4.399s qps=227.3 avg=4.399ms p50=14.459ms p95=16.275ms p99=56.587ms recall=0.9576
+[hnsw M=32 efC=200 efS=768 metric=l2] N=50000 d=1536 topk=10 nq=1000 threads=32 build=146.727s search=6.046s qps=165.4 avg=6.046ms p50=15.645ms p95=16.478ms p99=51.576ms recall=0.9675
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=50000 d=1536 topk=10 nq=1000 threads=32 build=0.229s search=2.756s qps=362.8 avg=2.756ms p50=44.813ms p95=45.341ms p99=48.472ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=50000 d=1536 topk=10 nq=1000 threads=32 build=158.043s search=0.601s qps=1663.6 avg=0.601ms p50=2.434ms p95=3.429ms p99=16.241ms recall=0.5981
+[hnsw M=32 efC=200 efS=128 metric=l2] N=50000 d=1536 topk=10 nq=1000 threads=32 build=163.522s search=1.101s qps=908.6 avg=1.101ms p50=4.292ms p95=5.881ms p99=14.049ms recall=0.7563
+[hnsw M=32 efC=200 efS=256 metric=l2] N=50000 d=1536 topk=10 nq=1000 threads=32 build=164.279s search=2.153s qps=464.4 avg=2.153ms p50=7.722ms p95=8.726ms p99=24.990ms recall=0.8716
+[hnsw M=32 efC=200 efS=384 metric=l2] N=50000 d=1536 topk=10 nq=1000 threads=32 build=157.076s search=2.878s qps=347.5 avg=2.878ms p50=9.891ms p95=10.287ms p99=27.605ms recall=0.9197
+[hnsw M=32 efC=200 efS=512 metric=l2] N=50000 d=1536 topk=10 nq=1000 threads=32 build=163.544s search=3.836s qps=260.7 avg=3.836ms p50=11.995ms p95=12.348ms p99=27.215ms recall=0.9443
+[hnsw M=32 efC=200 efS=640 metric=l2] N=50000 d=1536 topk=10 nq=1000 threads=32 build=167.928s search=4.879s qps=205.0 avg=4.879ms p50=13.963ms p95=15.637ms p99=34.312ms recall=0.9587
+[hnsw M=32 efC=200 efS=768 metric=l2] N=50000 d=1536 topk=10 nq=1000 threads=32 build=160.312s search=6.933s qps=144.2 avg=6.933ms p50=16.214ms p95=18.050ms p99=49.769ms recall=0.9681
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=100000 d=1536 topk=10 nq=1000 threads=32 build=0.470s search=4.484s qps=223.0 avg=4.484ms p50=92.388ms p95=96.877ms p99=106.884ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=100000 d=1536 topk=10 nq=1000 threads=32 build=360.247s search=0.600s qps=1666.5 avg=0.600ms p50=2.698ms p95=8.004ms p99=10.441ms recall=0.5027
+[hnsw M=32 efC=200 efS=128 metric=l2] N=100000 d=1536 topk=10 nq=1000 threads=32 build=345.684s search=1.213s qps=824.6 avg=1.213ms p50=5.099ms p95=5.682ms p99=12.028ms recall=0.6555
+[hnsw M=32 efC=200 efS=256 metric=l2] N=100000 d=1536 topk=10 nq=1000 threads=32 build=349.731s search=2.497s qps=400.5 avg=2.497ms p50=8.803ms p95=9.960ms p99=33.114ms recall=0.7922
+[hnsw M=32 efC=200 efS=384 metric=l2] N=100000 d=1536 topk=10 nq=1000 threads=32 build=356.952s search=3.571s qps=280.0 avg=3.571ms p50=11.554ms p95=12.739ms p99=30.956ms recall=0.8576
+[hnsw M=32 efC=200 efS=512 metric=l2] N=100000 d=1536 topk=10 nq=1000 threads=32 build=362.070s search=4.124s qps=242.5 avg=4.124ms p50=15.012ms p95=16.940ms p99=32.942ms recall=0.8858
+[hnsw M=32 efC=200 efS=640 metric=l2] N=100000 d=1536 topk=10 nq=1000 threads=32 build=352.506s search=5.593s qps=178.8 avg=5.593ms p50=18.043ms p95=20.065ms p99=28.170ms recall=0.9135
+[hnsw M=32 efC=200 efS=768 metric=l2] N=100000 d=1536 topk=10 nq=1000 threads=32 build=371.100s search=7.261s qps=137.7 avg=7.261ms p50=20.497ms p95=22.560ms p99=23.590ms recall=0.9264
+--------------------------------------------------------------------------------------------------------
+[flat metric=l2] N=100000 d=1536 topk=10 nq=1000 threads=32 build=0.485s search=4.700s qps=212.8 avg=4.700ms p50=91.016ms p95=96.079ms p99=108.739ms recall=1.000
+[hnsw M=32 efC=200 efS=64 metric=l2] N=100000 d=1536 topk=10 nq=1000 threads=32 build=364.803s search=0.707s qps=1414.9 avg=0.707ms p50=2.857ms p95=3.328ms p99=8.400ms recall=0.5153
+[hnsw M=32 efC=200 efS=128 metric=l2] N=100000 d=1536 topk=10 nq=1000 threads=32 build=372.044s search=1.238s qps=807.8 avg=1.238ms p50=4.869ms p95=5.772ms p99=25.255ms recall=0.6716
+[hnsw M=32 efC=200 efS=256 metric=l2] N=100000 d=1536 topk=10 nq=1000 threads=32 build=364.927s search=2.495s qps=400.9 avg=2.495ms p50=8.519ms p95=9.779ms p99=11.766ms recall=0.8062
+[hnsw M=32 efC=200 efS=384 metric=l2] N=100000 d=1536 topk=10 nq=1000 threads=32 build=351.342s search=3.561s qps=280.9 avg=3.561ms p50=11.677ms p95=12.380ms p99=40.254ms recall=0.8630
+[hnsw M=32 efC=200 efS=512 metric=l2] N=100000 d=1536 topk=10 nq=1000 threads=32 build=353.888s search=5.188s qps=192.8 avg=5.188ms p50=14.554ms p95=16.762ms p99=26.262ms recall=0.8937
+[hnsw M=32 efC=200 efS=640 metric=l2] N=100000 d=1536 topk=10 nq=1000 threads=32 build=367.436s search=5.026s qps=199.0 avg=5.026ms p50=17.373ms p95=19.005ms p99=27.358ms recall=0.9183
+[hnsw M=32 efC=200 efS=768 metric=l2] N=100000 d=1536 topk=10 nq=1000 threads=32 build=373.644s search=7.884s qps=126.8 avg=7.884ms p50=19.355ms p95=20.458ms p99=46.048ms recall=0.9309
+--------------------------------------------------------------------------------------------------------

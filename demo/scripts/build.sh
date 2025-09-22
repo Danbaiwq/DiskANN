@@ -15,10 +15,10 @@ DEMO_BIN="${DEMO_BIN:-$REPO_ROOT/build/demo/demo_test}"
 STREAM_KMEANS_BIN="${STREAM_KMEANS_BIN:-$REPO_ROOT/build/demo/stream_kmeans}"
 
 # 构建产物输出目录
-OUTPUT_DIR="${OUTPUT_DIR:-/data/1/demo/gist}"
+OUTPUT_DIR="${OUTPUT_DIR:-/data/1/demo/sift}"
 
 # 基础数据（base.fbin）路径（请设置为实际文件）
-BASE_FBIN="${BASE_FBIN:-/data/dataset/gist/gist_base.fbin}"    # 例：/data/sift_base.fbin
+BASE_FBIN="${BASE_FBIN:-/data/dataset/sift/sift_test/sift_1M.fbin}"    # 例：/data/sift_base.fbin
 
 # 构建参数（可按需调整）
 USE_BQ="${USE_BQ:-1}"                 # 1 启用 BQ 模式；0 构 raw 的 bucket_vamana.index
