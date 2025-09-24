@@ -28,10 +28,25 @@ def analyze_cluster_access(access_file, cluster_file=None, output_dir=None):
     
     # Read cluster size data if available
     cluster_sizes = None
+    size_map = None
+    aligned_sizes = None
+    aligned_access = None
     if cluster_file and os.path.exists(cluster_file):
         try:
             cluster_df = pd.read_csv(cluster_file)
-            cluster_sizes = cluster_df['vector_count'].values
+            # Expect columns: cluster_id, vector_count
+            if 'cluster_id' in cluster_df.columns and 'vector_count' in cluster_df.columns:
+                cluster_sizes = cluster_df['vector_count'].values
+                size_map = dict(zip(cluster_df['cluster_id'].values, cluster_df['vector_count'].values))
+                # Align by cluster_id to ensure same length for scatter/correlation
+                merged = pd.merge(
+                    access_df[['cluster_id', 'access_count']],
+                    cluster_df[['cluster_id', 'vector_count']],
+                    on='cluster_id', how='inner'
+                )
+                if not merged.empty:
+                    aligned_access = merged['access_count'].values
+                    aligned_sizes = merged['vector_count'].values
             print(f"Loaded cluster size data from {cluster_file}")
         except Exception as e:
             print(f"Warning: Failed to read cluster file: {e}")
@@ -46,10 +61,12 @@ def analyze_cluster_access(access_file, cluster_file=None, output_dir=None):
     max_access = np.max(access_counts)
     median_access = np.median(access_counts)
     
-    # Find hot and cold clusters
+    # Find hot and cold clusters (use positions, then map to actual IDs)
     non_zero_accesses = access_counts[access_counts > 0]
     zero_access_count = np.sum(access_counts == 0)
-    hot_clusters = np.argsort(access_counts)[-10:][::-1]  # Top 10 most accessed
+    order = np.argsort(access_counts)
+    hot_pos = order[-10:][::-1]  # positions of top 10
+    hot_ids = cluster_ids[hot_pos]
     
     # Print statistics
     print("=" * 60)
@@ -70,116 +87,59 @@ def analyze_cluster_access(access_file, cluster_file=None, output_dir=None):
     print("=" * 60)
     
     print("\nTop 10 Most Accessed Clusters:")
-    for i, cluster_id in enumerate(hot_clusters):
-        size_info = f" (size: {cluster_sizes[cluster_id]})" if cluster_sizes is not None else ""
-        print(f"  {i+1}. Cluster {cluster_id}: {access_counts[cluster_id]} accesses{size_info}")
+    for i, pos in enumerate(hot_pos):
+        cid = int(cluster_ids[pos])
+        size_info = f" (size: {size_map.get(cid)})" if size_map is not None and cid in size_map else ""
+        print(f"  {i+1}. Cluster {cid}: {int(access_counts[pos])} accesses{size_info}")
     
-    # Generate plots
-    fig_rows = 3 if cluster_sizes is not None else 2
-    plt.figure(figsize=(16, fig_rows * 4))
-    
-    # Plot 1: Access count histogram
-    plt.subplot(fig_rows, 3, 1)
-    plt.hist(access_counts, bins=50, alpha=0.7, color='lightblue', edgecolor='black')
-    plt.axvline(mean_access, color='red', linestyle='--', linewidth=2, label=f'Mean: {mean_access:.1f}')
-    plt.axvline(median_access, color='green', linestyle='--', linewidth=2, label=f'Median: {median_access:.1f}')
-    plt.xlabel('Access Count per Cluster')
-    plt.ylabel('Number of Clusters')
-    plt.title('Distribution of Cluster Access Counts')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    
-    # Plot 2: Box plot
-    plt.subplot(fig_rows, 3, 2)
-    plt.boxplot(access_counts, vert=True)
-    plt.ylabel('Access Count per Cluster')
-    plt.title('Box Plot of Access Counts')
-    plt.grid(True, alpha=0.3)
-    
-    # Plot 3: Cumulative distribution
-    plt.subplot(fig_rows, 3, 3)
-    sorted_counts = np.sort(access_counts)
-    cumulative = np.arange(1, len(sorted_counts) + 1) / len(sorted_counts)
-    plt.plot(sorted_counts, cumulative, linewidth=2)
-    plt.xlabel('Access Count per Cluster')
-    plt.ylabel('Cumulative Probability')
-    plt.title('Cumulative Distribution Function')
-    plt.grid(True, alpha=0.3)
-    
-    # Plot 4: Access count by cluster ID (all clusters)
-    plt.subplot(fig_rows, 3, 4)
-    plt.bar(cluster_ids, access_counts, alpha=0.7, color='orange', width=max(1, total_clusters//200))
-    plt.axhline(mean_access, color='blue', linestyle='--', alpha=0.8, label=f'Mean: {mean_access:.1f}')
-    plt.xlabel('Cluster ID')
-    plt.ylabel('Access Count')
-    plt.title('Access Count by Cluster ID (All Clusters)')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    
-    # Plot 5: Top 50 clusters detailed view
-    plt.subplot(fig_rows, 3, 5)
-    show_detail = min(50, total_clusters)
-    plt.bar(range(show_detail), access_counts[:show_detail], alpha=0.8, color='purple')
-    plt.axhline(mean_access, color='red', linestyle='--', alpha=0.8, label=f'Mean: {mean_access:.1f}')
-    plt.xlabel('Cluster ID')
-    plt.ylabel('Access Count')
-    plt.title(f'Access Count by Cluster ID (First {show_detail} Clusters)')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    
-    # Plot 6: Hot clusters (top 20)
-    plt.subplot(fig_rows, 3, 6)
-    top_20 = min(20, len(hot_clusters))
-    top_cluster_ids = hot_clusters[:top_20]
-    top_access_counts = access_counts[top_cluster_ids]
-    plt.bar(range(top_20), top_access_counts, alpha=0.8, color='red')
-    plt.xlabel('Rank (Most Accessed)')
-    plt.ylabel('Access Count')
-    plt.title(f'Top {top_20} Most Accessed Clusters')
-    plt.xticks(range(top_20), [f'C{cid}' for cid in top_cluster_ids], rotation=45)
-    plt.grid(True, alpha=0.3)
-    
-    # Plot 7-9: Correlation with cluster sizes (if available)
-    if cluster_sizes is not None:
-        # Plot 7: Access vs Size scatter
-        plt.subplot(fig_rows, 3, 7)
-        plt.scatter(cluster_sizes, access_counts, alpha=0.6, s=20)
-        plt.xlabel('Cluster Size (Vector Count)')
+    # Generate a single plot: Top-50 clusters by access
+    plt.figure(figsize=(16, 6))
+    top_n = 50
+    # Prefer aligned merge with sizes
+    if cluster_file and aligned_access is not None and aligned_sizes is not None and len(aligned_access) > 0:
+        merged = pd.merge(
+            access_df[['cluster_id', 'access_count']],
+            pd.DataFrame({'cluster_id': list(size_map.keys()), 'vector_count': list(size_map.values())}),
+            on='cluster_id', how='inner'
+        )
+        merged.sort_values('access_count', ascending=False, inplace=True)
+        top = merged.head(top_n)
+        x_ids = top['cluster_id'].astype(int).values
+        y_sizes = top['vector_count'].values
+        y_access = top['access_count'].values
+        x_pos = np.arange(len(x_ids))
+        bars = plt.bar(x_pos, y_sizes, color='skyblue', edgecolor='black')
+        for i, b in enumerate(bars):
+            plt.text(b.get_x() + b.get_width()/2.0, b.get_height()*0.5, str(int(y_access[i])),
+                     ha='center', va='center', fontsize=8, color='black')
+        plt.xticks(x_pos, [str(cid) for cid in x_ids], rotation=45)
+        plt.xlabel('Cluster ID')
+        plt.ylabel('Cluster Size (Vector Count)')
+        plt.title(f'Top-{len(x_ids)} Clusters: Bar=Size, Label=Access Count')
+        plt.grid(True, axis='y', alpha=0.3)
+        plt.tight_layout()
+    else:
+        # Fallback: no size data, show access-only top-N
+        order_desc = np.argsort(access_counts)[::-1]
+        sel = order_desc[:top_n]
+        x_ids = cluster_ids[sel]
+        y_access = access_counts[sel]
+        x_pos = np.arange(len(x_ids))
+        bars = plt.bar(x_pos, y_access, color='orange', edgecolor='black')
+        for i, b in enumerate(bars):
+            plt.text(b.get_x() + b.get_width()/2.0, b.get_height()*0.5, str(int(y_access[i])),
+                     ha='center', va='center', fontsize=8, color='black')
+        plt.xticks(x_pos, [str(int(cid)) for cid in x_ids], rotation=45)
+        plt.xlabel('Cluster ID')
         plt.ylabel('Access Count')
-        plt.title('Access Count vs Cluster Size')
-        plt.grid(True, alpha=0.3)
-        
-        # Calculate correlation
-        correlation = np.corrcoef(cluster_sizes, access_counts)[0, 1]
-        plt.text(0.05, 0.95, f'Correlation: {correlation:.3f}', 
-                transform=plt.gca().transAxes, bbox=dict(boxstyle="round", facecolor='wheat'))
-        
-        # Plot 8: Access rate (access/size) histogram
-        plt.subplot(fig_rows, 3, 8)
-        # Avoid division by zero
-        access_rates = np.divide(access_counts, cluster_sizes, 
-                               out=np.zeros_like(access_counts, dtype=float), 
-                               where=cluster_sizes!=0)
-        plt.hist(access_rates, bins=50, alpha=0.7, color='green', edgecolor='black')
-        plt.xlabel('Access Rate (Access/Size)')
-        plt.ylabel('Number of Clusters')
-        plt.title('Distribution of Access Rates')
-        plt.grid(True, alpha=0.3)
-        
-        # Plot 9: Size vs Access rate scatter
-        plt.subplot(fig_rows, 3, 9)
-        plt.scatter(cluster_sizes, access_rates, alpha=0.6, s=20, color='brown')
-        plt.xlabel('Cluster Size (Vector Count)')
-        plt.ylabel('Access Rate (Access/Size)')
-        plt.title('Cluster Size vs Access Rate')
-        plt.grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    
+        plt.title(f'Top-{len(x_ids)} Clusters by Access (size unavailable)')
+        plt.grid(True, axis='y', alpha=0.3)
+        plt.tight_layout()
+
     # Save plots
     if output_dir is None:
         output_dir = os.path.dirname(access_file)
-    
+ 
     plot_file = os.path.join(output_dir, 'cluster_access_analysis.png')
     plt.savefig(plot_file, dpi=300, bbox_inches='tight')
     print(f"Analysis plots saved to: {plot_file}")
@@ -208,12 +168,13 @@ def analyze_cluster_access(access_file, cluster_file=None, output_dir=None):
             f.write(f"  {p}th percentile: {percentile:.2f}\n")
         
         f.write(f"\nTop 10 Most Accessed Clusters:\n")
-        for i, cluster_id in enumerate(hot_clusters[:10]):
-            size_info = f" (size: {cluster_sizes[cluster_id]})" if cluster_sizes is not None else ""
-            f.write(f"  {i+1}. Cluster {cluster_id}: {access_counts[cluster_id]} accesses{size_info}\n")
+        for i, pos in enumerate(hot_pos[:10]):
+            cid = int(cluster_ids[pos])
+            size_info = f" (size: {size_map.get(cid)})" if size_map is not None and cid in size_map else ""
+            f.write(f"  {i+1}. Cluster {cid}: {int(access_counts[pos])} accesses{size_info}\n")
         
-        if cluster_sizes is not None:
-            correlation = np.corrcoef(cluster_sizes, access_counts)[0, 1]
+        if aligned_sizes is not None and aligned_access is not None and len(aligned_sizes) > 0:
+            correlation = np.corrcoef(aligned_sizes, aligned_access)[0, 1]
             f.write(f"\nCorrelation with Cluster Size: {correlation:.4f}\n")
     
     print(f"Detailed statistics saved to: {stats_output}")

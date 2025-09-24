@@ -127,7 +127,7 @@ void build_mode(const std::string& data_path) {
 
     // --- Parameters ---
     const float alpha = 0.01f;
-    const size_t m = 1024;
+    const size_t m = 10240;
     const int t = 8;
     const int l = 10;
     const float beta = 1.6f;  // 新增：距离比例约束参数
@@ -300,13 +300,19 @@ void build_mode(const std::string& data_path) {
     
     // --- 均衡后的分桶策略（容量约束 + 次近回退） ---
     if (!reuse_buckets) {
-        std::cout << "Starting balanced vector bucketing with capacity constraint..." << std::endl;
+        bool constraint_enabled = (get_env_int("CONSTRAINT_MAX_BUCKET", 1) != 0);
+        std::cout << (constraint_enabled
+            ? "Starting balanced vector bucketing with capacity constraint..."
+            : "Starting vector bucketing without capacity constraint...") << std::endl;
 
         buckets.assign(m, {});
         total_bucket_assignments = 0;
 
         // 每个簇的容量上限：不超过 (l * N) / m
-        const size_t per_cluster_cap = (static_cast<size_t>(l) * num_points) / m;
+        const size_t per_cluster_cap = constraint_enabled
+            ? (static_cast<size_t>(l) * num_points) / m
+            : std::numeric_limits<size_t>::max();
+
         std::vector<size_t> cluster_load(m, 0);
     
         if (!use_stream_chunks) {

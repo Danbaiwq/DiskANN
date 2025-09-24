@@ -14,28 +14,30 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DEMO_BIN="${DEMO_BIN:-$REPO_ROOT/build/demo/demo_test}"
 
 # 索引产物所在目录（构建脚本写入的位置）
-INDEX_DIR="${INDEX_DIR:-/data/1/demo/sift}"
+INDEX_DIR="${INDEX_DIR:-/data/1/demo/gist}"
 
 # 查询数据与评测 GT 路径（请设置为实际文件）
-QUERY_FBIN="${QUERY_FBIN:-/data/dataset/sift/sift_query.fbin}"            # 例：/data/sift_query.fbin
-GROUNDTRUTH_IVECS="${GROUNDTRUTH_IVECS:-/data/dataset/sift/sift_query_base_gt100}"  # 例：/data/sift_query_learn_gt100
+QUERY_FBIN="${QUERY_FBIN:-/data/dataset/gist/gist_query.fbin}"            # 例：/data/sift_query.fbin
+GROUNDTRUTH_IVECS="${GROUNDTRUTH_IVECS:-/data/dataset/gist/gist_query_base_gt100}"  # 例：/data/sift_query_learn_gt100
 # 原始向量库（用于真距复排）
-BASE_FBIN="${BASE_FBIN:-/data/dataset/sift/sift_test/sift_1M.fbin}"
+BASE_FBIN="${BASE_FBIN:-/data/dataset/gist/gist_base.fbin}"
 
 # 查询参数（可按需调整）
-BQ_GRAPH_THRESHOLD="${BQ_GRAPH_THRESHOLD:-16000}"  # >= 阈值走 bqgraph，否则 bq.bin fastscan
+BQ_GRAPH_THRESHOLD="${BQ_GRAPH_THRESHOLD:-120000}"  # >= 阈值走 bqgraph，否则 bq.bin fastscan
 BQ_EF_SEARCH="${BQ_EF_SEARCH:-196}"             # bqgraph 的 ef 宽度
 BQ_SEEDS="${BQ_SEEDS:-8}"                       # bqgraph 的入口点数
 
 # 新增：查询参数 F 与 K
 DEMO_F_PARAM="${DEMO_F_PARAM:-4}"
-DEMO_K_PARAM="${DEMO_K_PARAM:-100}"
+DEMO_K_PARAM="${DEMO_K_PARAM:-20}"
 
 # 新增：BQ 缓存内存预算（MB）
 BQ_BUCKET_CACHE_MB="${BQ_BUCKET_CACHE_MB:-400}"
 BQ_GRAPH_CACHE_MB="${BQ_GRAPH_CACHE_MB:-0}"
 # 新增：预热前 N 个最大桶（按桶大小排序，0 表示不预热）
 BQ_PREWARM_TOP="${BQ_PREWARM_TOP:-0}"
+
+CLUSTER_STATS_ENABLE="${CLUSTER_STATS_ENABLE:-1}" # 是否启用簇统计与访问分析
 
 # 基本校验
 if [[ ! -x "$DEMO_BIN" ]]; then
@@ -65,6 +67,7 @@ cat <<EOF
 [demo search] BQ_PREWARM_TOP     : $BQ_PREWARM_TOP
 [demo search] DEMO_F_PARAM       : $DEMO_F_PARAM
 [demo search] DEMO_K_PARAM       : $DEMO_K_PARAM
+[demo search] CLUSTER_STATS_ENABLE: $CLUSTER_STATS_ENABLE
 EOF
 
 # 确保绘图不阻塞（monitor_process.py 内已支持 PLOT_SHOW 环境开关）
@@ -81,6 +84,7 @@ BQ_GRAPH_CACHE_MB="$BQ_GRAPH_CACHE_MB" \
 BQ_PREWARM_TOP="$BQ_PREWARM_TOP" \
 DEMO_F_PARAM="$DEMO_F_PARAM" \
 DEMO_K_PARAM="$DEMO_K_PARAM" \
+CLUSTER_STATS_ENABLE="$CLUSTER_STATS_ENABLE" \
 "$DEMO_BIN" "$QUERY_FBIN" "$GROUNDTRUTH_IVECS" &
 
 PID=$!

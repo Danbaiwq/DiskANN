@@ -22,15 +22,15 @@ Percentile Information:
   99th percentile: 62.90
 
 Top 10 Most Accessed Clusters:
-  1. Cluster 148: 88 accesses (size: 39062)
-  2. Cluster 0: 72 accesses (size: 39062)
-  3. Cluster 88: 64 accesses (size: 39062)
-  4. Cluster 139: 62 accesses (size: 39062)
-  5. Cluster 171: 61 accesses (size: 39062)
-  6. Cluster 124: 58 accesses (size: 39062)
-  7. Cluster 189: 58 accesses (size: 39062)
-  8. Cluster 188: 56 accesses (size: 39062)
-  9. Cluster 34: 56 accesses (size: 39062)
-  10. Cluster 211: 54 accesses (size: 39062)
+  1. Cluster 148: 88 accesses (size: 12)
+  2. Cluster 0: 72 accesses (size: 976)
+  3. Cluster 88: 64 accesses (size: 976)
+  4. Cluster 139: 62 accesses (size: 98)
+  5. Cluster 171: 61 accesses (size: 976)
+  6. Cluster 189: 58 accesses (size: 82)
+  7. Cluster 124: 58 accesses (size: 150)
+  8. Cluster 34: 56 accesses (size: 19)
+  9. Cluster 188: 56 accesses (size: 976)
+  10. Cluster 211: 54 accesses (size: 976)
 
-Correlation with Cluster Size: 0.5459
+Correlation with Cluster Size: -0.0141

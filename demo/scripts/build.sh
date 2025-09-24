@@ -15,15 +15,15 @@ DEMO_BIN="${DEMO_BIN:-$REPO_ROOT/build/demo/demo_test}"
 STREAM_KMEANS_BIN="${STREAM_KMEANS_BIN:-$REPO_ROOT/build/demo/stream_kmeans}"
 
 # 构建产物输出目录
-OUTPUT_DIR="${OUTPUT_DIR:-/data/1/demo/sift}"
+OUTPUT_DIR="${OUTPUT_DIR:-/data/1/demo/gist}"
 
 # 基础数据（base.fbin）路径（请设置为实际文件）
-BASE_FBIN="${BASE_FBIN:-/data/dataset/sift/sift_test/sift_1M.fbin}"    # 例：/data/sift_base.fbin
+BASE_FBIN="${BASE_FBIN:-/data/dataset/gist/gist_base.fbin}"    # 例：/data/sift_base.fbin
 
 # 构建参数（可按需调整）
 USE_BQ="${USE_BQ:-1}"                 # 1 启用 BQ 模式；0 构 raw 的 bucket_vamana.index
 BQ_BITS="${BQ_BITS:-4}"                # 量化比特总数
-BQ_GRAPH_THRESHOLD="${BQ_GRAPH_THRESHOLD:-16000}"  # >= 阈值构 bqgraph，否则 bq.bin
+BQ_GRAPH_THRESHOLD="${BQ_GRAPH_THRESHOLD:-120000}"  # >= 阈值构 bqgraph，否则 bq.bin
 BQ_SATURATE_PASS="${BQ_SATURATE_PASS:-1}"        # 轻量互连/饱和微修复（度不增）
 
 # 新增：构图量化模式（仅在 USE_BQ=1 时生效）
@@ -51,6 +51,17 @@ CENTROIDS_OUT="${CENTROIDS_OUT:-/data/1/demo/deep/centroids.fbin}"
 BUCKET_BUILD_PARALLELISM="${BUCKET_BUILD_PARALLELISM:-}"
 # 新增：构建阶段总内存上限（GiB），用于流式分桶批量大小和并行度控制
 CONSTRUCT_MAX_GB="${CONSTRUCT_MAX_GB:-50}"
+
+# 新增：是否启用桶内最大数量限制（1=启用，0=不限制）
+CONSTRAINT_MAX_BUCKET="${CONSTRAINT_MAX_BUCKET:-1}"
+# 兼容：允许用户通过更直观的变量名设置（优先级更高）
+if [[ -n "${constraint_max_bucket:-}" ]]; then
+  if [[ "$constraint_max_bucket" == "0" || "$constraint_max_bucket" == "false" ]]; then
+    CONSTRAINT_MAX_BUCKET=0
+  else
+    CONSTRAINT_MAX_BUCKET=1
+  fi
+fi
 # =====================================
 
 # 基本校验
@@ -79,6 +90,7 @@ cat <<EOF
 [demo build] BUCKET_BUILD_PARALLELISM: ${BUCKET_BUILD_PARALLELISM:-auto}
 [demo build] CONSTRUCT_MAX_GB     : ${CONSTRUCT_MAX_GB:-unset}
 [demo build] MKL_THREADING_LAYER : $MKL_THREADING_LAYER
+[demo build] CONSTRAINT_MAX_BUCKET: $CONSTRAINT_MAX_BUCKET
 EOF
 
 # 仅在 stream 模式下展示流式相关参数
@@ -139,6 +151,7 @@ CONSTRUCT_MAX_GB="${CONSTRUCT_MAX_GB}" \
 MKL_THREADING_LAYER="$MKL_THREADING_LAYER" \
 BUCKET_BUILD_START="$BUCKET_BUILD_START" \
 BUCKET_BUILD_END="$BUCKET_BUILD_END" \
+CONSTRAINT_MAX_BUCKET="$CONSTRAINT_MAX_BUCKET" \
 "$DEMO_BIN" "$BASE_FBIN"
 else
 DEMO_OUTPUT_DIR="$OUTPUT_DIR" \
@@ -151,6 +164,7 @@ BUCKET_BUILD_PARALLELISM="${BUCKET_BUILD_PARALLELISM}" \
 KMEANS_MODE="$KMEANS_MODE" \
 CONSTRUCT_MAX_GB="${CONSTRUCT_MAX_GB}" \
 MKL_THREADING_LAYER="$MKL_THREADING_LAYER" \
+CONSTRAINT_MAX_BUCKET="$CONSTRAINT_MAX_BUCKET" \
 "$DEMO_BIN" "$BASE_FBIN"
 fi
 
